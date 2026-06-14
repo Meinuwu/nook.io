@@ -1,0 +1,473 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* Warm cozy light palette */
+    --bg: #f5e6d3;
+    --bg-subtle: #f0e4d4;
+    --bg-panel: rgb(255 255 255 / 0.7);
+    --bg-elevated: rgb(255 255 255 / 0.6);
+    --bg-input: rgb(255 255 255 / 0.8);
+    --bg-nav: rgb(255 255 255 / 0.9);
+    --text: #5c4033;
+    --text-muted: #8f7a66;
+    --border: rgb(196 168 130 / 0.3);
+    --border-strong: rgb(196 168 130 / 0.4);
+    --accent-peach: #f4a98a;
+    --accent-sage: #c8d5b9;
+    --accent-wood: #c4a882;
+    --shadow-cozy: 0 8px 24px rgb(92 64 51 / 0.12);
+    --shadow-cozy-lg: 0 16px 40px rgb(92 64 51 / 0.18);
+    --shadow-nav: 0 -4px 24px rgb(92 64 51 / 0.08);
+    --toggle-off: #f5e6d3;
+    --toggle-knob: #ffffff;
+    --cozy-gradient: linear-gradient(
+      to bottom right,
+      #f5e6d3,
+      #f0e4d4,
+      rgb(200 213 185 / 0.5)
+    );
+    --mail-envelope-gradient: linear-gradient(to bottom, #e8dcc8, #f5e6d3);
+    --mail-postcard-gradient: linear-gradient(
+      to bottom right,
+      #faf3e8,
+      #f5e6d3,
+      rgb(200 213 185 / 0.2)
+    );
+    --mail-postcard-open-gradient: linear-gradient(
+      to bottom right,
+      #ffffff,
+      #faf3e8,
+      rgb(244 169 138 / 0.1)
+    );
+
+    /* RGB tokens for Tailwind opacity modifiers */
+    --bg-rgb: 245 230 211;
+    --text-rgb: 92 64 51;
+    --text-muted-rgb: 143 122 102;
+    --accent-wood-rgb: 196 168 130;
+    --accent-peach-rgb: 244 169 138;
+    --accent-sage-rgb: 200 213 185;
+    --surface-rgb: 255 255 255;
+  }
+
+  [data-theme="dark"] {
+    color-scheme: dark;
+
+    /* Warm dark palette — readable, not muddy */
+    --bg: #1a1612;
+    --bg-subtle: #2a2420;
+    --bg-panel: #2f2a26;
+    --bg-elevated: #3d3530;
+    --bg-input: #2a2420;
+    --bg-nav: #1f1b17;
+    --text: #f5e6d3;
+    --text-muted: #b8a088;
+    --border: #4a423c;
+    --border-strong: #5a5048;
+    --accent-peach: #e8956f;
+    --accent-sage: #9bb08a;
+    --accent-wood: #8b7355;
+    --shadow-cozy: 0 8px 24px rgb(0 0 0 / 0.35);
+    --shadow-cozy-lg: 0 16px 40px rgb(0 0 0 / 0.45);
+    --shadow-nav: 0 -4px 24px rgb(0 0 0 / 0.4);
+    --toggle-off: #3d3530;
+    --toggle-knob: #f5e6d3;
+    --cozy-gradient: linear-gradient(to bottom right, #1a1612, #2a2420, #3d4a35);
+    --mail-envelope-gradient: linear-gradient(to bottom, #2f2a26, #1a1612);
+    --mail-postcard-gradient: linear-gradient(
+      to bottom right,
+      #3d3530,
+      #2f2a26,
+      rgb(155 176 138 / 0.15)
+    );
+    --mail-postcard-open-gradient: linear-gradient(
+      to bottom right,
+      #3d3530,
+      #2f2a26,
+      rgb(232 149 111 / 0.12)
+    );
+
+    --bg-rgb: 26 22 18;
+    --text-rgb: 245 230 211;
+    --text-muted-rgb: 184 160 136;
+    --accent-wood-rgb: 139 115 85;
+    --accent-peach-rgb: 232 149 111;
+    --accent-sage-rgb: 155 176 138;
+    --surface-rgb: 61 53 48;
+  }
+
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    margin: 0;
+    background-color: var(--bg);
+    color: var(--text);
+    font-family: theme("fontFamily.sans");
+    -webkit-font-smoothing: subpixel-antialiased;
+    -moz-osx-font-smoothing: auto;
+    text-rendering: optimizeLegibility;
+    transition: background-color 0.3s ease, color 0.3s ease;
+  }
+}
+
+@layer components {
+  .btn-pill {
+    @apply rounded-full px-6 py-3 font-bold transition-all duration-150 active:scale-95 disabled:opacity-50 disabled:active:scale-100;
+  }
+
+  .btn-primary {
+    @apply btn-pill text-white shadow-cozy hover:brightness-95;
+    background-color: var(--accent-peach);
+  }
+
+  .btn-secondary {
+    @apply btn-pill shadow-cozy hover:brightness-95;
+    background-color: var(--accent-sage);
+    color: var(--text);
+  }
+
+  .btn-ghost {
+    @apply btn-pill hover:brightness-95;
+    background-color: var(--bg-elevated);
+    color: var(--text);
+  }
+
+  .profile-action-btn {
+    @apply inline-flex items-center justify-center gap-0.5 rounded-lg px-3 py-2 text-sm font-bold transition-all active:scale-[0.98] hover:brightness-95;
+    background-color: var(--bg-elevated);
+    color: var(--text);
+  }
+
+  [data-theme="dark"] .btn-ghost:hover {
+    background-color: var(--bg-panel);
+  }
+
+  .panel {
+    @apply rounded-4xl p-6 shadow-cozy;
+    background-color: var(--bg-panel);
+    border: 1px solid var(--border-strong);
+  }
+
+  .input-cozy {
+    @apply w-full rounded-2xl border-2 px-4 py-3 outline-none transition-colors;
+    background-color: var(--bg-input);
+    border-color: var(--border);
+    color: var(--text);
+  }
+
+  .input-cozy::placeholder {
+    color: rgb(var(--text-rgb) / 0.45);
+  }
+
+  .input-cozy:focus {
+    border-color: var(--accent-peach);
+  }
+
+  .cozy-bg {
+    @apply min-h-full;
+    background: var(--cozy-gradient);
+    background-size: 200% 200%;
+    animation: cozy-shift 12s ease-in-out infinite;
+  }
+
+  .mail-postcard {
+    @apply rounded-4xl border-2 border-dashed p-6 shadow-cozy;
+    background: var(--mail-postcard-gradient);
+    border-color: var(--border-strong);
+  }
+
+  .mail-postcard-open {
+    @apply rounded-4xl border-2 border-dashed p-6 shadow-cozy-lg;
+    background: var(--mail-postcard-open-gradient);
+    border-color: rgb(var(--accent-peach-rgb) / 0.5);
+  }
+
+  .mail-envelope {
+    @apply rounded-3xl border-2 border-dashed shadow-cozy;
+    background: var(--mail-envelope-gradient);
+    border-color: var(--border-strong);
+  }
+
+  .mail-stamp {
+    @apply inline-flex h-10 w-10 items-center justify-center rounded-full border-2 border-dashed text-lg shadow-cozy;
+    background-color: var(--bg-panel);
+    border-color: var(--border-strong);
+  }
+
+  .wax-seal {
+    @apply rounded-full px-4 py-2.5 text-sm font-extrabold text-white shadow-cozy transition-transform active:scale-95 disabled:opacity-50;
+  }
+
+  .wax-seal-accept {
+    @apply hover:brightness-95;
+    background-color: var(--accent-peach);
+  }
+
+  .wax-seal-decline {
+    @apply hover:brightness-95;
+    background-color: var(--accent-sage);
+    color: var(--text);
+  }
+
+  .bottom-nav {
+    @apply fixed inset-x-0 bottom-0 z-50 rounded-t-3xl border-t backdrop-blur-md;
+    background-color: var(--bg-nav);
+    border-color: var(--border);
+    box-shadow: var(--shadow-nav);
+  }
+
+  .bottom-nav-tab-active {
+    background-color: rgb(var(--accent-peach-rgb) / 0.2);
+    color: var(--text);
+  }
+
+  .bottom-nav-tab-inactive {
+    color: rgb(var(--text-rgb) / 0.55);
+  }
+
+  .bottom-nav-tab-inactive:hover {
+    color: rgb(var(--text-rgb) / 0.75);
+  }
+
+  .toggle-track {
+    @apply relative inline-flex h-6 w-11 shrink-0 items-center overflow-hidden rounded-full transition-colors duration-200 focus-visible:outline-none focus-visible:ring-2 disabled:opacity-50;
+    --tw-ring-color: rgb(var(--accent-peach-rgb) / 0.5);
+  }
+
+  .toggle-track-on {
+    background-color: var(--accent-peach);
+  }
+
+  .toggle-track-off {
+    background-color: var(--toggle-off);
+    box-shadow: inset 0 0 0 1px var(--border);
+  }
+
+  .toggle-knob {
+    @apply inline-block h-5 w-5 shrink-0 rounded-full shadow-sm transition-transform duration-200 ease-out;
+    background-color: var(--toggle-knob);
+  }
+
+  .room-bottom-bar {
+    @apply z-10 flex shrink-0 items-end justify-between gap-4 border-t px-4 py-3;
+    background-color: var(--bg);
+    border-color: var(--border-strong);
+  }
+
+  .avatar-crisp {
+    image-rendering: -webkit-optimize-contrast;
+  }
+
+  .selectable-option {
+    @apply rounded-2xl px-4 py-3 text-left transition-all;
+    background-color: rgb(var(--bg-rgb) / 0.6);
+    color: var(--text);
+  }
+
+  .selectable-option:hover {
+    background-color: rgb(var(--bg-rgb) / 0.9);
+  }
+
+  .selectable-option--selected {
+    background-color: rgb(var(--accent-peach-rgb) / 0.2);
+    box-shadow: inset 0 0 0 2px rgb(var(--accent-peach-rgb) / 0.4);
+    color: var(--text);
+  }
+
+  .selectable-option__title {
+    @apply text-sm font-bold;
+  }
+
+  .selectable-option__description {
+    @apply text-xs;
+    color: rgb(var(--text-muted-rgb) / 0.85);
+  }
+
+  [data-theme="dark"] .selectable-option--selected {
+    background-color: rgb(var(--accent-peach-rgb) / 0.24);
+    box-shadow: inset 0 0 0 2px rgb(var(--accent-peach-rgb) / 0.45);
+  }
+
+  [data-theme="dark"] .selectable-option--selected .selectable-option__description {
+    color: rgb(var(--text-muted-rgb) / 0.92);
+  }
+
+  .setting-row {
+    @apply flex items-center justify-between rounded-2xl px-4 py-3;
+    background-color: rgb(var(--bg-rgb) / 0.6);
+    color: var(--text);
+  }
+
+  .setting-row__description {
+    @apply text-xs;
+    color: rgb(var(--text-muted-rgb) / 0.85);
+  }
+
+  .settings-note {
+    @apply mt-3 rounded-2xl px-4 py-3 text-xs;
+    background-color: rgb(var(--bg-rgb) / 0.6);
+    color: rgb(var(--text-muted-rgb) / 0.9);
+  }
+
+  .info-field {
+    @apply rounded-2xl px-4 py-3;
+    background-color: rgb(var(--bg-rgb) / 0.6);
+    color: var(--text);
+  }
+
+  .info-field__label {
+    @apply text-[10px] font-bold uppercase tracking-wide;
+    color: rgb(var(--text-muted-rgb) / 0.85);
+  }
+
+  .stat-row {
+    @apply flex items-center justify-between rounded-2xl px-4 py-3 transition-transform hover:scale-[1.02];
+    background-color: rgb(var(--bg-rgb) / 0.6);
+  }
+
+  .achievement-count-badge {
+    @apply rounded-full px-2 py-0.5 text-xs font-bold;
+    background-color: rgb(var(--accent-peach-rgb) / 0.2);
+    color: var(--text);
+  }
+
+  [data-theme="dark"] .achievement-count-badge {
+    background-color: rgb(var(--accent-peach-rgb) / 0.24);
+    box-shadow: inset 0 0 0 1px rgb(var(--accent-peach-rgb) / 0.45);
+    color: var(--text);
+  }
+
+  .achievement-section-subtitle {
+    @apply mb-3 text-sm;
+    color: rgb(var(--text-muted-rgb) / 0.85);
+  }
+
+  [data-theme="dark"] .achievement-section-subtitle {
+    color: rgb(var(--text-muted-rgb) / 0.92);
+  }
+
+  .leaderboard-row {
+    @apply flex items-center gap-3 rounded-2xl py-2.5 pl-3 pr-4;
+    background-color: var(--bg-elevated);
+  }
+
+  .leaderboard-row-self {
+    @apply border-l-[3px];
+    border-left-color: var(--accent-peach);
+    background-color: rgb(var(--surface-rgb) / 0.85);
+  }
+
+  .leaderboard-row-other {
+    @apply border-l-[3px] border-transparent;
+  }
+
+  .metric-pill-inactive {
+    @apply rounded-full px-3 py-1 text-xs font-extrabold transition-all;
+    background-color: var(--bg-elevated);
+    color: var(--text);
+  }
+
+  .metric-pill-inactive:hover {
+    background-color: var(--bg-panel);
+  }
+
+  .bg-elevated-pedestal {
+    background-color: var(--bg-elevated);
+  }
+
+  .achievement-section {
+    @apply rounded-4xl border-2 p-5 backdrop-blur-sm;
+    background-color: rgb(var(--surface-rgb) / 0.4);
+  }
+
+  .achievement-card {
+    @apply flex items-start gap-4 rounded-3xl border-2 p-4 transition-all;
+    background-color: var(--bg-panel);
+  }
+
+  .achievement-card-unlocked {
+    @apply animate-pop-in;
+    background: linear-gradient(
+      to bottom right,
+      rgb(var(--surface-rgb) / 0.9),
+      rgb(var(--bg-rgb) / 0.4)
+    );
+  }
+
+  .achievement-card-locked {
+    @apply opacity-70 grayscale;
+  }
+
+  [data-theme="dark"] .achievement-card-locked {
+    opacity: 0.85;
+  }
+
+  [data-theme="dark"] .achievement-card-locked .text-brown\/40 {
+    color: rgb(var(--text-muted-rgb) / 0.85);
+  }
+}
+
+@layer utilities {
+  [data-theme="dark"] .bg-white\/30 {
+    background-color: rgb(var(--surface-rgb) / 0.35);
+  }
+
+  [data-theme="dark"] .bg-white\/40 {
+    background-color: rgb(var(--surface-rgb) / 0.45);
+  }
+
+  [data-theme="dark"] .bg-white\/50 {
+    background-color: rgb(var(--surface-rgb) / 0.55);
+  }
+
+  [data-theme="dark"] .bg-white\/60 {
+    background-color: rgb(var(--surface-rgb) / 0.65);
+  }
+
+  [data-theme="dark"] .bg-white\/70 {
+    background-color: rgb(var(--surface-rgb) / 0.75);
+  }
+
+  [data-theme="dark"] .bg-white\/80 {
+    background-color: rgb(var(--surface-rgb) / 0.85);
+  }
+
+  [data-theme="dark"] .bg-white\/90 {
+    background-color: rgb(var(--surface-rgb) / 0.9);
+  }
+
+  [data-theme="dark"] .hover\:bg-white:hover {
+    background-color: var(--bg-panel);
+  }
+
+  [data-theme="dark"] .hover\:bg-white\/50:hover {
+    background-color: rgb(var(--surface-rgb) / 0.55);
+  }
+
+  [data-theme="dark"] .border-white {
+    border-color: var(--bg-panel);
+  }
+}
+
+@keyframes cozy-shift {
+  0%,
+  100% {
+    background-position: 0% 50%;
+  }
+  50% {
+    background-position: 100% 50%;
+  }
+}
+
+/* Phaser study room — prevent browser upscaling of the canvas */
+.phaser-room-host canvas {
+  display: block;
+  touch-action: none;
+}
