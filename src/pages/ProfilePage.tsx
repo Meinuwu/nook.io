@@ -14,6 +14,9 @@ export default function ProfilePage() {
   const { profile } = useAuth();
   const [friendCount, setFriendCount] = useState(0);
   const [onlineStatus, setOnlineStatus] = useState<backend.OnlineStatus>("offline");
+  const [stats, setStats] = useState<backend.StudyStats | null>(null);
+  const [streak, setStreak] = useState<backend.StreakInfo | null>(null);
+  const [streakRank, setStreakRank] = useState<{ rank: number; total: number } | null>(null);
   const [toast, setToast] = useState<string | null>(null);
   const [showPhotoLightbox, setShowPhotoLightbox] = useState(false);
 
@@ -31,12 +34,30 @@ export default function ProfilePage() {
     return backend.subscribeToFriends(uid, refreshFriends);
   }, [userId, profile?.onlineStatus]);
 
+  useEffect(() => {
+    if (!userId) return;
+    const uid = userId;
+    function refreshStats() {
+      setStats(backend.getStats(uid));
+      setStreak(backend.getStreak(uid));
+      setStreakRank(backend.getFriendLeaderboardRank(uid, "streak"));
+    }
+    refreshStats();
+    const unsub = backend.subscribeToStudyStats(uid, refreshStats);
+    const tick = setInterval(refreshStats, 1000);
+    return () => {
+      unsub();
+      clearInterval(tick);
+    };
+  }, [userId]);
+
   if (!profile) return null;
 
   const { userId: profileUserId, displayName, email, bio, profilePhotoUrl } = profile;
-  const stats = backend.getStats(profileUserId);
-  const streak = backend.getStreak(profileUserId);
-  const streakRank = backend.getFriendLeaderboardRank(profileUserId, "streak");
+  const displayStats = stats ?? backend.getStats(profileUserId);
+  const displayStreak = streak ?? backend.getStreak(profileUserId);
+  const displayStreakRank =
+    streakRank ?? backend.getFriendLeaderboardRank(profileUserId, "streak");
   const earnedCount = backend.getUserAchievements(profileUserId).length;
   const username = profile.username ?? email.split("@")[0];
 
@@ -87,7 +108,7 @@ export default function ProfilePage() {
           )}
 
           <div className="mt-4 flex justify-around border-t border-olive/10 pt-3">
-            <ProfileStat value={streak.currentStreak} label="streak" />
+            <ProfileStat value={displayStreak.currentStreak} label="streak" />
             <ProfileStat
               value={friendCount}
               label="friends"
@@ -148,20 +169,23 @@ export default function ProfilePage() {
         <section className="panel animate-pop-in">
           <h2 className="mb-3 text-lg font-extrabold text-brown">Your stats</h2>
           <div className="flex flex-col gap-3">
-            <StatRow label="Focus time today" value={`${stats.todayMinutes} min`} />
-            <StatRow label="Sessions this week" value={`${stats.weekSessions}`} />
-            <StatRow label="Total focus" value={`${stats.totalHours} hrs`} />
+            <StatRow
+              label="Focus time today"
+              value={backend.formatTodayFocus(displayStats.todaySeconds)}
+            />
+            <StatRow label="Sessions this week" value={`${displayStats.weekSessions}`} />
+            <StatRow label="Total focus" value={`${displayStats.totalHours} hrs`} />
             <StatRow
               label="Longest streak"
-              value={`${streak.longestStreak} ${streak.longestStreak === 1 ? "day" : "days"}`}
+              value={`${displayStreak.longestStreak} ${displayStreak.longestStreak === 1 ? "day" : "days"}`}
             />
           </div>
           <p className="mt-3 rounded-2xl bg-cream/60 px-3 py-2 text-sm font-semibold text-brown">
-            {streak.studiedToday
+            {displayStreak.studiedToday
               ? "Keep it going — you studied today!"
-              : streak.atRisk
+              : displayStreak.atRisk
                 ? "Study today to keep your streak alive!"
-                : streak.currentStreak > 0
+                : displayStreak.currentStreak > 0
                   ? "Start a session to grow your streak!"
                   : "Complete a 15+ min session to start a streak!"}
           </p>
@@ -175,7 +199,7 @@ export default function ProfilePage() {
           >
             <span className="text-sm font-extrabold text-brown">Leaderboard</span>
             <span className="flex items-center gap-2 text-sm font-semibold text-olive/80">
-              {streakRank && `#${streakRank.rank} streak`}
+              {displayStreakRank && `#${displayStreakRank.rank} streak`}
               <span className="text-peach" aria-hidden>→</span>
             </span>
           </button>

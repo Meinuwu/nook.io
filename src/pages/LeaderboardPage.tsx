@@ -52,7 +52,14 @@ export default function LeaderboardPage() {
       setEntries(backend.getFriendLeaderboard(uid, metric));
     }
     refresh();
-    return backend.subscribeToFriends(uid, refresh);
+    const unsubFriends = backend.subscribeToFriends(uid, refresh);
+    const unsubStats = backend.subscribeToStudyStats(uid, refresh);
+    const tick = setInterval(refresh, 1000);
+    return () => {
+      unsubFriends();
+      unsubStats();
+      clearInterval(tick);
+    };
   }, [userId, metric]);
 
   const selfEntry = useMemo(

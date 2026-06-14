@@ -443,8 +443,8 @@ function daysBetween(a: string, b: string): number {
   return Math.round((msB - msA) / (24 * 60 * 60 * 1000));
 }
 
-function updateStreak(db: DbShape, userId: string, durationMinutes: number) {
-  if (durationMinutes < STREAK_MIN_MINUTES) return;
+function updateStreak(db: DbShape, userId: string, sessionTotalMinutes: number) {
+  if (sessionTotalMinutes < STREAK_MIN_MINUTES) return;
 
   const meta = getMeta(db, userId);
   const today = dateKey(new Date());
@@ -470,6 +470,16 @@ function updateStreak(db: DbShape, userId: string, durationMinutes: number) {
   }
 }
 
+/** Apply streak rules after a focus session reaches qualifying length. */
+export function applyStreakForSessionMinutes(userId: string, sessionTotalMinutes: number): void {
+  const db = loadDb();
+  updateStreak(db, userId, sessionTotalMinutes);
+  saveDb(db);
+  const meta = getMeta(db, userId);
+  checkStreakAchievements(userId, meta.longestStreak);
+  notifyStudyStats(userId);
+}
+
 function checkStreakAchievements(userId: string, longestStreak: number) {
   if (longestStreak >= 3) awardAchievement(userId, "streak_spark");
   if (longestStreak >= 7) awardAchievement(userId, "streak_week");
@@ -491,7 +501,8 @@ type RealtimeMessage =
   | { type: "chat"; roomId: string }
   | { type: "friends"; userId: string }
   | { type: "dm"; userId: string; peerId: string }
-  | { type: "userNooks"; userId: string };
+  | { type: "userNooks"; userId: string }
+  | { type: "studyStats"; userId: string };
 
 const channel: BroadcastChannel | null =
   typeof BroadcastChannel !== "undefined" ? new BroadcastChannel("nook-realtime") : null;
@@ -501,6 +512,7 @@ const chatListeners = new Map<string, Set<() => void>>();
 const friendListeners = new Map<string, Set<() => void>>();
 const dmListeners = new Map<string, Set<() => void>>();
 const userNooksListeners = new Map<string, Set<() => void>>();
+const studyStatsListeners = new Map<string, Set<() => void>>();
 
 function dmKey(userId: string, peerId: string): string {
   return [userId, peerId].sort().join(":");
@@ -531,6 +543,17 @@ function notifyUserNooks(userId: string) {
   userNooksListeners.get(userId)?.forEach((cb) => cb());
 }
 
+export function notifyStudyStats(userId: string) {
+  channel?.postMessage({ type: "studyStats", userId });
+  studyStatsListeners.get(userId)?.forEach((cb) => cb());
+}
+
+export function subscribeToStudyStats(userId: string, cb: () => void): () => void {
+  if (!studyStatsListeners.has(userId)) studyStatsListeners.set(userId, new Set());
+  studyStatsListeners.get(userId)!.add(cb);
+  return () => studyStatsListeners.get(userId)?.delete(cb);
+}
+
 channel?.addEventListener("message", (e: MessageEvent<RealtimeMessage>) => {
   if (e.data?.type === "members") {
     memberListeners.get(e.data.roomId)?.forEach((cb) => cb());
@@ -546,6 +569,9 @@ channel?.addEventListener("message", (e: MessageEvent<RealtimeMessage>) => {
   }
   if (e.data?.type === "userNooks") {
     userNooksListeners.get(e.data.userId)?.forEach((cb) => cb());
+  }
+  if (e.data?.type === "studyStats") {
+    studyStatsListeners.get(e.data.userId)?.forEach((cb) => cb());
   }
 });
 
@@ -1137,7 +1163,9 @@ export function commitFocusProgress(
       sessionTotalMinutes = Math.floor(totalSeconds / 60);
       addedWholeMinutes =
         Math.floor(totalSeconds / 60) - Math.floor(prevSeconds / 60);
-      if (addedWholeMinutes > 0) updateStreak(db, userId, addedWholeMinutes);
+      if (sessionTotalMinutes >= STREAK_MIN_MINUTES) {
+        updateStreak(db, userId, sessionTotalMinutes);
+      }
     }
   }
 
@@ -1146,6 +1174,7 @@ export function commitFocusProgress(
   if (addedWholeMinutes > 0 || finalize) {
     saveDb(db);
     notifyRoom(roomId);
+    notifyStudyStats(userId);
   }
 
   if (addedWholeMinutes > 0) {
@@ -1171,6 +1200,7 @@ export async function recordSession(
   });
   updateStreak(db, userId, durationMinutes);
   saveDb(db);
+  notifyStudyStats(userId);
   const meta = getMeta(loadDb(), userId);
   checkStreakAchievements(userId, meta.longestStreak);
   checkSessionAchievements(userId, durationMinutes);
@@ -1187,6 +1217,66 @@ function getQualifyingDayKeys(userId: string): Set<string> {
       .filter((s) => s.durationMinutes >= STREAK_MIN_MINUTES)
       .map((s) => dateKey(new Date(s.completedAt)))
   );
+}
+
+function reconcileStreakMetaFromSessions(db: DbShape, userId: string): void {
+  const dayKeys = Array.from(getQualifyingDayKeys(userId)).sort((a, b) => {
+    const [ay, am, ad] = a.split("-").map(Number);
+    const [by, bm, bd] = b.split("-").map(Number);
+    return new Date(ay, am, ad).getTime() - new Date(by, bm, bd).getTime();
+  });
+  if (dayKeys.length === 0) return;
+
+  const meta = getMeta(db, userId);
+  const today = dateKey(new Date());
+
+  let longest = 0;
+  let run = 0;
+  let prev: string | null = null;
+  for (const dk of dayKeys) {
+    if (prev === null || daysBetween(prev, dk) === 1) run += 1;
+    else run = 1;
+    longest = Math.max(longest, run);
+    prev = dk;
+  }
+  meta.longestStreak = Math.max(meta.longestStreak, longest);
+
+  const yesterday = dateKey(
+    new Date(new Date().getFullYear(), new Date().getMonth(), new Date().getDate() - 1)
+  );
+  let anchor: string | null = null;
+  if (dayKeys.includes(today)) anchor = today;
+  else if (dayKeys.includes(yesterday)) anchor = yesterday;
+
+  let current = 0;
+  if (anchor) {
+    let cursor = anchor;
+    while (dayKeys.includes(cursor)) {
+      current += 1;
+      const [y, m, d] = cursor.split("-").map(Number);
+      cursor = dateKey(new Date(y, m, d - 1));
+    }
+  }
+  meta.currentStreak = current;
+  meta.lastStudyDate = dayKeys.includes(today) ? today : dayKeys[dayKeys.length - 1] ?? null;
+}
+
+/** Replace local study sessions for a user (remote sync). */
+export function syncUserStudySessions(userId: string, sessions: StudySession[]): void {
+  const db = loadDb();
+  db.sessions = db.sessions.filter((s) => s.userId !== userId).concat(sessions);
+  reconcileStreakMetaFromSessions(db, userId);
+  saveDb(db);
+  notifyStudyStats(userId);
+}
+
+/** Upsert one study session into local storage (remote commit mirror). */
+export function upsertLocalStudySession(session: StudySession): void {
+  const db = loadDb();
+  const idx = db.sessions.findIndex((s) => s.id === session.id);
+  if (idx >= 0) db.sessions[idx] = session;
+  else db.sessions.push(session);
+  saveDb(db);
 }
 
 function hasStudiedEveryDayForDays(userId: string, days: number): boolean {
@@ -1263,8 +1353,64 @@ export function checkStudyBuddyAchievement(roomId: string, userId: string) {
 
 export interface StudyStats {
   todayMinutes: number;
+  /** Saved + in-progress focus seconds for today (local midnight). */
+  todaySeconds: number;
   weekSessions: number;
   totalHours: number;
+}
+
+function startOfTodayMs(now = new Date()): number {
+  return new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
+}
+
+/** Uncommitted focus seconds across all rooms for a user. */
+export function getLiveFocusSeconds(userId: string, db?: DbShape): number {
+  const d = db ?? loadDb();
+  const now = Date.now();
+  let live = 0;
+  for (const m of d.members) {
+    if (m.userId === userId && m.status === "studying" && m.focusStartedAt != null) {
+      live += Math.max(0, (now - m.focusStartedAt) / 1000);
+    }
+  }
+  return live;
+}
+
+export function formatTodayFocus(totalSeconds: number): string {
+  const mins = Math.floor(totalSeconds / 60);
+  const secs = Math.floor(totalSeconds % 60);
+  if (mins >= 60) {
+    const hours = Math.floor(mins / 60);
+    const remainder = mins % 60;
+    return remainder > 0 ? `${hours}h ${remainder}m` : `${hours} hrs`;
+  }
+  if (secs > 0) return `${mins}m ${secs}s`;
+  return `${mins} min`;
+}
+
+export function computeStudyStats(userId: string, extraLiveSeconds = 0): StudyStats {
+  const db = loadDb();
+  const mine = db.sessions.filter((s) => s.userId === userId);
+  const now = new Date();
+  const startOfToday = startOfTodayMs(now);
+  const weekAgo = now.getTime() - 7 * 24 * 60 * 60 * 1000;
+  const liveSeconds = getLiveFocusSeconds(userId, db) + extraLiveSeconds;
+
+  const todaySavedSeconds = mine
+    .filter((s) => s.completedAt >= startOfToday)
+    .reduce((sum, s) => sum + sessionDurationSeconds(s), 0);
+  const todaySeconds = todaySavedSeconds + liveSeconds;
+
+  const weekSessions = mine.filter((s) => s.completedAt >= weekAgo).length;
+  const totalSavedSeconds = mine.reduce((sum, s) => sum + sessionDurationSeconds(s), 0);
+  const totalMinutes = (totalSavedSeconds + liveSeconds) / 60;
+
+  return {
+    todayMinutes: Math.floor(todaySeconds / 60),
+    todaySeconds,
+    weekSessions,
+    totalHours: Math.round((totalMinutes / 60) * 10) / 10,
+  };
 }
 
 export function getStreak(userId: string): StreakInfo {
@@ -1280,8 +1426,11 @@ export function getStreak(userId: string): StreakInfo {
     current = 0;
   }
 
-  const studiedToday = meta.lastStudyDate === today;
-  const atRisk = !studiedToday && meta.lastStudyDate != null && daysBetween(meta.lastStudyDate, today) === 1;
+  const studiedToday =
+    meta.lastStudyDate === today ||
+    computeStudyStats(userId).todaySeconds >= 60;
+  const atRisk =
+    !studiedToday && meta.lastStudyDate != null && daysBetween(meta.lastStudyDate, today) === 1;
 
   return {
     currentStreak: current,
@@ -1292,23 +1441,7 @@ export function getStreak(userId: string): StreakInfo {
 }
 
 export function getStats(userId: string): StudyStats {
-  const db = loadDb();
-  const mine = db.sessions.filter((s) => s.userId === userId);
-  const now = new Date();
-  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
-  const weekAgo = now.getTime() - 7 * 24 * 60 * 60 * 1000;
-
-  const todayMinutes = mine
-    .filter((s) => s.completedAt >= startOfToday)
-    .reduce((sum, s) => sum + s.durationMinutes, 0);
-  const weekSessions = mine.filter((s) => s.completedAt >= weekAgo).length;
-  const totalMinutes = mine.reduce((sum, s) => sum + s.durationMinutes, 0);
-
-  return {
-    todayMinutes,
-    weekSessions,
-    totalHours: Math.round((totalMinutes / 60) * 10) / 10,
-  };
+  return computeStudyStats(userId, 0);
 }
 
 // ---------------------------------------------------------------------------
@@ -1922,15 +2055,17 @@ export interface LeaderboardEntry {
 
 function getWeekFocusMinutes(userId: string, db: DbShape): number {
   const weekAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
-  return db.sessions
+  const saved = db.sessions
     .filter((s) => s.userId === userId && s.completedAt >= weekAgo)
-    .reduce((sum, s) => sum + s.durationMinutes, 0);
+    .reduce((sum, s) => sum + sessionDurationSeconds(s) / 60, 0);
+  return saved + getLiveFocusSeconds(userId, db) / 60;
 }
 
 function getTotalFocusMinutes(userId: string, db: DbShape): number {
-  return db.sessions
+  const saved = db.sessions
     .filter((s) => s.userId === userId)
-    .reduce((sum, s) => sum + s.durationMinutes, 0);
+    .reduce((sum, s) => sum + sessionDurationSeconds(s) / 60, 0);
+  return saved + getLiveFocusSeconds(userId, db) / 60;
 }
 
 function buildLeaderboardEntry(

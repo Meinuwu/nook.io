@@ -40,9 +40,8 @@ export {
   LEADERBOARD_METRIC_LABELS,
   formatAchievementProgress,
   formatStudyMinutes,
+  formatTodayFocus,
   recordSession,
-  getStats,
-  getStreak,
   getUserAchievements,
   getAchievementProgress,
   getFriendLeaderboard,
@@ -70,6 +69,8 @@ export async function initBackend(): Promise<void> {
     try {
       remote = await import("./remoteBackend");
       await remote.initRemoteBackend();
+      const userId = remote.getMyUserId();
+      if (userId) await remote.refreshUserStudySessionsCache(userId);
     } catch (err) {
       console.warn(
         "[nook] Remote backend init failed — falling back to local mock.",
@@ -162,6 +163,25 @@ export async function updatePassword(newPassword: string): Promise<void> {
 export function commitFocusProgress(roomId: string, userId: string, finalize = false): void {
   if (remote) return r().commitFocusProgress(roomId, userId, finalize);
   return mock.commitFocusProgress(roomId, userId, finalize);
+}
+
+export function getStats(userId: string): mock.StudyStats {
+  if (remote) return r().getStats(userId);
+  return mock.getStats(userId);
+}
+
+export function getStreak(userId: string): mock.StreakInfo {
+  if (remote) return r().getStreak(userId);
+  return mock.getStreak(userId);
+}
+
+export function subscribeToStudyStats(userId: string, cb: () => void): () => void {
+  if (remote) return r().subscribeToStudyStats(userId, cb);
+  return mock.subscribeToStudyStats(userId, cb);
+}
+
+export async function refreshUserStudyStats(userId: string): Promise<void> {
+  if (remote) return r().refreshUserStudySessionsCache(userId);
 }
 
 export function getRoomStudyLeaderboard(

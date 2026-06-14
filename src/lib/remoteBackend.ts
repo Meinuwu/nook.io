@@ -28,8 +28,16 @@ import type { RoomLeaderboardEntry, RoomLeaderboardPeriod } from "./mockBackend"
 import {
   normalizeUsername,
   validateUsername,
-  getStats,
+  computeStudyStats,
+  getStreak as getLocalStreak,
+  applyStreakForSessionMinutes,
+  upsertLocalStudySession,
+  syncUserStudySessions,
+  notifyStudyStats,
+  subscribeToStudyStats,
   grantAchievement,
+  STREAK_MIN_MINUTES,
+  type StudySession,
 } from "./mockBackend";
 
 if (!supabase) {
@@ -1667,6 +1675,57 @@ export function checkStudyBuddyAchievement(roomId: string, userId: string): void
 const membersCache = new Map<string, RoomMember[]>();
 const roomStudySessionsCache = new Map<string, StudySessionRow[]>();
 
+function getRemoteLiveFocusSeconds(userId: string): number {
+  const now = Date.now();
+  let live = 0;
+  for (const members of membersCache.values()) {
+    for (const m of members) {
+      if (m.userId === userId && m.status === "studying" && m.focusStartedAt != null) {
+        live += Math.max(0, (now - m.focusStartedAt) / 1000);
+      }
+    }
+  }
+  return live;
+}
+
+export function getStats(userId: string) {
+  return computeStudyStats(userId, getRemoteLiveFocusSeconds(userId));
+}
+
+export function getStreak(userId: string) {
+  return getLocalStreak(userId);
+}
+
+async function loadUserStudySessions(userId: string): Promise<StudySessionRow[]> {
+  const { data, error } = await db
+    .from("study_sessions")
+    .select("*")
+    .eq("user_id", userId)
+    .order("completed_at", { ascending: false });
+  if (error) throw new Error(error.message);
+  return (data as StudySessionRow[] | null) ?? [];
+}
+
+function rowToStudySession(row: StudySessionRow): StudySession {
+  return {
+    id: row.id,
+    userId: row.user_id,
+    roomId: row.room_id ?? undefined,
+    durationSeconds: row.duration_seconds,
+    durationMinutes: row.duration_minutes,
+    completedAt: row.completed_at,
+  };
+}
+
+export async function refreshUserStudySessionsCache(userId: string): Promise<void> {
+  await safeRemote(`user study sessions (${userId})`, async () => {
+    const rows = await loadUserStudySessions(userId);
+    syncUserStudySessions(userId, rows.map(rowToStudySession));
+  }, undefined);
+}
+
+export { subscribeToStudyStats, notifyStudyStats };
+
 async function loadRoomStudySessions(roomId: string): Promise<StudySessionRow[]> {
   const weekAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
   const { data, error } = await db
@@ -1700,6 +1759,7 @@ async function commitFocusProgressAsync(
   if (!member) return;
 
   let addedWholeMinutes = 0;
+  let sessionTotalMinutes = 0;
   const startedAt = member.focusStartedAt;
   const updates: Partial<MemberRow> = { updated_at: Date.now() };
 
@@ -1714,22 +1774,30 @@ async function commitFocusProgressAsync(
         .maybeSingle();
       const prevSeconds = existing ? sessionRowSeconds(existing as StudySessionRow) : 0;
       const totalSeconds = prevSeconds + elapsedSeconds;
+      sessionTotalMinutes = Math.floor(totalSeconds / 60);
       const row = {
         id: sessionId,
         user_id: userId,
         room_id: roomId,
         duration_seconds: totalSeconds,
-        duration_minutes: Math.floor(totalSeconds / 60),
+        duration_minutes: sessionTotalMinutes,
         completed_at: Date.now(),
       };
       const { error: upsertErr } = await db.from("study_sessions").upsert(row);
       if (upsertErr) throw new Error(upsertErr.message);
 
+      upsertLocalStudySession(rowToStudySession(row as StudySessionRow));
+      if (sessionTotalMinutes >= STREAK_MIN_MINUTES) {
+        applyStreakForSessionMinutes(userId, sessionTotalMinutes);
+      } else {
+        notifyStudyStats(userId);
+      }
+
       updates.focus_started_at = startedAt + elapsedSeconds * 1000;
       updates.focus_session_id = sessionId;
       member.focusStartedAt = updates.focus_started_at as number;
       member.focusSessionId = sessionId;
-      addedWholeMinutes = Math.floor(totalSeconds / 60) - Math.floor(prevSeconds / 60);
+      addedWholeMinutes = sessionTotalMinutes - Math.floor(prevSeconds / 60);
     }
   }
 
