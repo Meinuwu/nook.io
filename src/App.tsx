@@ -16,10 +16,18 @@ import JoinPage from "./pages/JoinPage";
 import LeaderboardPage from "./pages/LeaderboardPage";
 import type { ReactNode } from "react";
 
+function AuthLoading() {
+  return (
+    <div className="cozy-bg flex h-full items-center justify-center">
+      <p className="text-olive animate-pulse text-sm font-semibold">Loading…</p>
+    </div>
+  );
+}
+
 /** Requires an authenticated profile that has finished avatar onboarding. */
 function RequireReady({ children }: { children: ReactNode }) {
   const { profile, loading } = useAuth();
-  if (loading) return null;
+  if (loading) return <AuthLoading />;
   if (!profile) return <Navigate to="/auth" replace />;
   if (!profile.avatarCreated) return <Navigate to="/onboarding" replace />;
   return <>{children}</>;
@@ -28,7 +36,7 @@ function RequireReady({ children }: { children: ReactNode }) {
 /** Requires auth but allows the onboarding step. */
 function RequireAuth({ children }: { children: ReactNode }) {
   const { profile, loading } = useAuth();
-  if (loading) return null;
+  if (loading) return <AuthLoading />;
   if (!profile) return <Navigate to="/auth" replace />;
   return <>{children}</>;
 }

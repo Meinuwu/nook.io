@@ -3,14 +3,25 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 const url = import.meta.env.VITE_SUPABASE_URL?.trim();
 const anonKey = import.meta.env.VITE_SUPABASE_ANON_KEY?.trim();
 
-export const isSupabaseConfigured = Boolean(url && anonKey);
+let supabase: SupabaseClient | null = null;
+let isSupabaseConfigured = false;
 
-export const supabase: SupabaseClient | null = isSupabaseConfigured
-  ? createClient(url!, anonKey!, {
+if (url && anonKey) {
+  try {
+    supabase = createClient(url, anonKey, {
       auth: {
         persistSession: true,
         autoRefreshToken: true,
         detectSessionInUrl: true,
       },
-    })
-  : null;
+    });
+    isSupabaseConfigured = true;
+  } catch (err) {
+    console.warn(
+      "[nook] Supabase client init failed — using local mock backend.",
+      err
+    );
+  }
+}
+
+export { isSupabaseConfigured, supabase };

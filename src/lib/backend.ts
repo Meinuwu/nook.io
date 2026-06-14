@@ -69,8 +69,16 @@ export async function initBackend(): Promise<void> {
   if (!isSupabaseConfigured) return;
   if (initPromise) return initPromise;
   initPromise = (async () => {
-    remote = await import("./remoteBackend");
-    await remote.initRemoteBackend();
+    try {
+      remote = await import("./remoteBackend");
+      await remote.initRemoteBackend();
+    } catch (err) {
+      console.warn(
+        "[nook] Remote backend init failed — falling back to local mock.",
+        err
+      );
+      remote = null;
+    }
   })();
   return initPromise;
 }

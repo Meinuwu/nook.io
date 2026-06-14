@@ -32,7 +32,9 @@ import {
 } from "./mockBackend";
 
 if (!supabase) {
-  throw new Error("remoteBackend loaded without Supabase configuration");
+  throw new Error(
+    "remoteBackend loaded without a working Supabase client — check VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY"
+  );
 }
 
 const db = supabase;

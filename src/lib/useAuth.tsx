@@ -35,15 +35,21 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   const loadFromSession = useCallback(async () => {
-    await initBackend();
-    const session = backend.getSession();
-    if (session) {
-      const p = await backend.getProfile(session.userId);
-      setProfile(p);
-    } else {
+    try {
+      await initBackend();
+      const session = backend.getSession();
+      if (session) {
+        const p = await backend.getProfile(session.userId);
+        setProfile(p);
+      } else {
+        setProfile(null);
+      }
+    } catch (err) {
+      console.error("[nook] Failed to load auth session:", err);
       setProfile(null);
+    } finally {
+      setLoading(false);
     }
-    setLoading(false);
   }, []);
 
   useEffect(() => {
