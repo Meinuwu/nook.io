@@ -421,7 +421,7 @@ export class LibraryScene extends Phaser.Scene {
   }
 
   /**
-   * Walk the local user to their assigned seat (study chair or campfire stool)
+   * Teleport the local user to their assigned seat (study chair or campfire stool)
    * and enter the seated studying pose. Idempotent — safe to call from both the
    * focus-start callback and the timer-phase transition.
    */
@@ -431,33 +431,27 @@ export class LibraryScene extends Phaser.Scene {
     const slot = member?.deskSlot ?? -1;
     if (!local || slot < 0) return;
 
-    const pos = this.seatPositions[slot];
-    if (!pos) return;
-
     this.localFreePosition = false;
     this.stopLocalWandering();
     local.deskSlot = slot;
+    this.teleportLocalUserToSeat(slot);
+    this.applyStatus(local, "studying");
+  }
 
-    if (local.walkTween) return;
+  /** Instantly snap the local user onto a seat — no path-following walk. */
+  private teleportLocalUserToSeat(slot: number) {
+    const local = this.avatars.get(this.myUserId);
+    const pos = this.seatPositions[slot];
+    if (!local || !pos) return;
 
-    if (local.isSeated && local.deskSlot === slot) {
-      this.applyStatus(local, "studying");
-      return;
-    }
-
-    const dist = Math.hypot(local.container.x - pos.x, local.container.y - pos.y);
-    if (dist < 14) {
-      this.seatAvatar(local);
-      this.applyStatus(local, "studying");
-      return;
-    }
-
+    local.walkTween?.stop();
+    local.walkTween = null;
+    if (local.isLocal) this.localWasdMoving = false;
+    local.deskSlot = slot;
     local.isSeated = false;
-    this.walkAvatarTo(local, pos.x, pos.y, () => {
-      this.localFreePosition = false;
-      this.seatAvatar(local);
-      this.applyStatus(local, "studying");
-    });
+    local.frog.setRotation(0);
+    local.seatFaceDY = 0;
+    this.seatAvatar(local);
   }
 
   /**
@@ -511,14 +505,13 @@ export class LibraryScene extends Phaser.Scene {
       this.localFreePosition = false;
       this.stopLocalWandering();
       if (local) {
-        if (!local.isSeated && !local.walkTween) {
-          this.beginFocusAtSeat();
-        } else {
-          this.applyStatus(local, member?.status ?? "idle");
+        if (!local.isSeated) {
+          this.teleportLocalUserToSeat(member!.deskSlot);
         }
+        this.applyStatus(local, member?.status ?? "idle");
       }
-    } else {
-      // break, paused, stopped, or pre-focus without a seat — roam freely
+    } else if (this.shouldLocalWander(phase)) {
+      // break, paused, stopped, or idle without a seat — wander the floor
       this.localFreePosition = true;
       if (local) {
         local.isSeated = false;
@@ -528,7 +521,7 @@ export class LibraryScene extends Phaser.Scene {
           phase === "break" ? "break" : member?.status ?? "idle";
         this.applyStatus(local, status);
       }
-      if (prev === "work" || !this.wanderTimer) {
+      if (prev === "work" || prev === "idle" || !this.wanderTimer) {
         this.startLocalWandering();
       }
     }
@@ -576,10 +569,19 @@ export class LibraryScene extends Phaser.Scene {
     });
   }
 
+  /** True when the local frog should roam (not studying and not locked to a pre-focus seat). */
+  private shouldLocalWander(phase: TimerPhase): boolean {
+    if (phase === "work") return false;
+    const member = this.membersCache.find((m) => m.userId === this.myUserId);
+    const hasSeat = (member?.deskSlot ?? -1) >= 0;
+    if (phase === "idle" && hasSeat) return false;
+    return phase === "break" || phase === "paused" || phase === "stopped" || phase === "idle";
+  }
+
   private startLocalWandering() {
-    if (!this.localFreePosition) return;
+    if (!this.localFreePosition || !this.shouldLocalWander(this.timerPhase)) return;
     this.stopLocalWandering();
-    this.scheduleNextWander(800);
+    this.scheduleNextWander(600);
   }
 
   private stopLocalWandering() {
@@ -802,19 +804,9 @@ export class LibraryScene extends Phaser.Scene {
     }
   }
 
-  private setupMovement(w: number, h: number) {
-    // Click target matches the walkable floor (top of floor → reserved bottom).
-    const top = h * L.floorTop;
-    const bottom = h * FLOOR_WALK_BOTTOM;
-    this.floorZone = this.add
-      .zone(w * 0.5, (top + bottom) / 2, w * 0.86, bottom - top)
-      .setInteractive({ useHandCursor: true })
-      .setDepth(1);
-
-    this.floorZone.on("pointerdown", (pointer: Phaser.Input.Pointer) => {
-      if (!this.localFreePosition) return;
-      this.walkLocalUserTo(pointer.worldX, pointer.worldY);
-    });
+  private setupMovement(_w: number, _h: number) {
+    // Floor walking removed — idle movement is handled by the wander state machine;
+    // seats teleport instantly; WASD remains for manual control while roaming.
   }
 
   update(_time: number, delta: number) {
@@ -874,35 +866,6 @@ export class LibraryScene extends Phaser.Scene {
     this.updateAvatarDepth(local);
   }
 
-  private walkLocalUserTo(x: number, y: number) {
-    const local = this.avatars.get(this.myUserId);
-    if (!local || !this.localFreePosition) return;
-
-    this.stopLocalWandering();
-    this.walkAvatarTo(local, x, y, () => {
-      this.scheduleNextWander(2500 + Math.random() * 2000);
-    });
-  }
-
-  private walkLocalUserToSeat(slot: number) {
-    const local = this.avatars.get(this.myUserId);
-    const pos = this.seatPositions[slot];
-    if (!local || !pos) return;
-
-    this.stopLocalWandering();
-    this.walkAvatarTo(local, pos.x, pos.y, () => {
-      local.deskSlot = slot;
-      this.localFreePosition = false;
-      this.stopLocalWandering();
-      this.seatAvatar(local);
-      const member = this.membersCache.find((m) => m.userId === this.myUserId);
-      this.applyStatus(
-        local,
-        this.timerPhase === "work" ? "studying" : member?.status ?? "idle"
-      );
-    });
-  }
-
   private handleLocalSeatSelected(slot: number) {
     if (this.isSeatTaken(slot)) return;
 
@@ -913,6 +876,7 @@ export class LibraryScene extends Phaser.Scene {
     const pos = this.seatPositions[slot];
     if (!pos) return;
 
+    this.localFreePosition = false;
     this.stopLocalWandering();
     if (!local) {
       const spawn =
@@ -920,12 +884,13 @@ export class LibraryScene extends Phaser.Scene {
         { x: this.centerX, y: this.centerY };
       local = this.buildAvatar({ ...member, deskSlot: slot }, spawn.x, spawn.y);
       this.avatars.set(this.myUserId, local);
-    } else {
-      local.deskSlot = slot;
-      local.isSeated = false;
     }
 
-    this.walkLocalUserToSeat(slot);
+    this.teleportLocalUserToSeat(slot);
+    this.applyStatus(
+      local,
+      this.timerPhase === "work" ? "studying" : member.status ?? "idle"
+    );
   }
 
   private drawLibrary(w: number, h: number) {
@@ -2020,47 +1985,33 @@ export class LibraryScene extends Phaser.Scene {
           ? this.navGrid?.findRandomWalkable(pos.x, pos.y, 30) ?? pos
           : pos;
         const avatar = this.buildAvatar(m, spawn.x, spawn.y);
-        if (isLocal && !shouldLockToSeat) {
-          this.walkLocalUserToSeat(m.deskSlot);
-        } else if (isLocal && shouldLockToSeat) {
+        if (shouldLockToSeat) {
           this.seatAvatar(avatar);
-          this.applyStatus(avatar, this.timerPhase === "work" ? "studying" : avatar.status);
+          this.applyStatus(
+            avatar,
+            this.timerPhase === "work" ? "studying" : m.status
+          );
         }
         this.avatars.set(m.userId, avatar);
       } else {
         if (existing.deskSlot !== m.deskSlot) {
           existing.deskSlot = m.deskSlot;
           if (isLocal) {
+            this.localFreePosition = false;
             this.stopLocalWandering();
-            existing.walkTween?.stop();
-            existing.walkTween = null;
-            if (shouldLockToSeat) {
-              this.walkAvatarTo(existing, pos.x, pos.y, () => {
-                this.seatAvatar(existing);
-                this.applyStatus(existing, "studying");
-              });
-            } else {
-              this.walkLocalUserToSeat(m.deskSlot);
-            }
+            this.teleportLocalUserToSeat(m.deskSlot);
+            this.applyStatus(
+              existing,
+              shouldLockToSeat ? "studying" : m.status
+            );
           } else if (shouldLockToSeat) {
             this.seatAvatar(existing);
           }
-        } else if (shouldLockToSeat && !existing.walkTween && !existing.isSeated) {
+        } else if (shouldLockToSeat && !existing.isSeated) {
           this.seatAvatar(existing);
-        } else if (isLocal && shouldLockToSeat && !existing.isSeated && !existing.walkTween) {
-          this.walkAvatarTo(existing, pos.x, pos.y, () => {
-            this.seatAvatar(existing);
-            this.applyStatus(existing, "studying");
-          });
-        } else if (
-          isLocal &&
-          !shouldLockToSeat &&
-          !this.localFreePosition &&
-          !existing.walkTween &&
-          !existing.isSeated &&
-          existing.deskSlot === m.deskSlot
-        ) {
-          this.walkLocalUserToSeat(m.deskSlot);
+        } else if (isLocal && shouldLockToSeat && !existing.isSeated) {
+          this.teleportLocalUserToSeat(m.deskSlot);
+          this.applyStatus(existing, "studying");
         }
 
         if (existing.status !== m.status) {

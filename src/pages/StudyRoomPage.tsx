@@ -24,6 +24,9 @@ export default function StudyRoomPage() {
   const [seatError, setSeatError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [localUserTyping, setLocalUserTyping] = useState(false);
+  const handleTypingChange = useCallback((isTyping: boolean) => {
+    setLocalUserTyping(isTyping);
+  }, []);
   const [timerPhase, setTimerPhase] = useState<TimerPhase>("idle");
   const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
   const phaserRoomRef = useRef<PhaserRoomHandle>(null);
@@ -296,7 +299,7 @@ export default function StudyRoomPage() {
             messages={chatMessages}
             onSend={handleSendChat}
             currentUserId={profile!.userId}
-            onTypingChange={setLocalUserTyping}
+            onTypingChange={handleTypingChange}
           />
         </div>
       </div>

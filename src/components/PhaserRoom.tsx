@@ -1,4 +1,4 @@
-import { forwardRef, useEffect, useImperativeHandle, useRef } from "react";
+import { forwardRef, memo, useEffect, useImperativeHandle, useRef } from "react";
 import Phaser from "phaser";
 import { LibraryScene, type TimerPhase } from "../game/LibraryScene";
 import { getDisplayDpi } from "../game/displayDpi";
@@ -6,7 +6,7 @@ import { normalizeCapacity } from "../game/roomLayout";
 import type { RoomMember, ChatMessage } from "../lib/backend";
 
 export interface PhaserRoomHandle {
-  /** Walk local user to their last assigned seat and sit down to study. */
+  /** Teleport local user to their last assigned seat and sit down to study. */
   beginFocusAtSeat: () => void;
 }
 
@@ -216,7 +216,7 @@ const PhaserRoom = forwardRef<PhaserRoomHandle, PhaserRoomProps>(function Phaser
     const scene = sceneRef.current;
     if (!scene?.sys?.isActive()) return;
     scene.setUserTyping(currentUserId, localUserTyping);
-  }, [currentUserId, localUserTyping, members]);
+  }, [currentUserId, localUserTyping]);
 
   useEffect(() => {
     const scene = sceneRef.current;
@@ -229,4 +229,4 @@ const PhaserRoom = forwardRef<PhaserRoomHandle, PhaserRoomProps>(function Phaser
   );
 });
 
-export default PhaserRoom;
+export default memo(PhaserRoom);

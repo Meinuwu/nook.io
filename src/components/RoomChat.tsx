@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { memo, useEffect, useRef, useState } from "react";
 import type { ChatMessage } from "../lib/backend";
 
 interface RoomChatProps {
@@ -9,7 +9,7 @@ interface RoomChatProps {
 }
 
 /** Inline chat panel for the bottom bar (right side). */
-export default function RoomChat({
+function RoomChat({
   messages,
   onSend,
   currentUserId,
@@ -18,15 +18,30 @@ export default function RoomChat({
   const [text, setText] = useState("");
   const [expanded, setExpanded] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const typingActiveRef = useRef(false);
+  const typingIdleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (typingIdleTimerRef.current) clearTimeout(typingIdleTimerRef.current);
+    };
+  }, []);
 
   useEffect(() => {
     if (expanded) bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, expanded]);
 
+  function setTypingActive(active: boolean) {
+    if (typingActiveRef.current === active) return;
+    typingActiveRef.current = active;
+    onTypingChange?.(active);
+  }
+
   function handleSend(e: React.FormEvent) {
     e.preventDefault();
     if (!text.trim()) return;
-    onTypingChange?.(false);
+    if (typingIdleTimerRef.current) clearTimeout(typingIdleTimerRef.current);
+    setTypingActive(false);
     onSend(text);
     setText("");
     setExpanded(true);
@@ -34,7 +49,15 @@ export default function RoomChat({
 
   function handleInputChange(value: string) {
     setText(value);
-    onTypingChange?.(value.trim().length > 0);
+    const hasText = value.trim().length > 0;
+    if (!hasText) {
+      if (typingIdleTimerRef.current) clearTimeout(typingIdleTimerRef.current);
+      setTypingActive(false);
+      return;
+    }
+    setTypingActive(true);
+    if (typingIdleTimerRef.current) clearTimeout(typingIdleTimerRef.current);
+    typingIdleTimerRef.current = setTimeout(() => setTypingActive(false), 1800);
   }
 
   return (
@@ -81,9 +104,12 @@ export default function RoomChat({
           maxLength={200}
           onFocus={() => {
             setExpanded(true);
-            if (text.trim()) onTypingChange?.(true);
+            if (text.trim()) setTypingActive(true);
           }}
-          onBlur={() => onTypingChange?.(false)}
+          onBlur={() => {
+            if (typingIdleTimerRef.current) clearTimeout(typingIdleTimerRef.current);
+            setTypingActive(false);
+          }}
         />
         <button type="submit" className="btn-primary !px-3 !py-2 text-sm">
           Send
@@ -92,3 +118,5 @@ export default function RoomChat({
     </div>
   );
 }
+
+export default memo(RoomChat);

@@ -18,7 +18,7 @@ interface FocusTimerProps {
   /** Commit focus time accrued so far. `finalize` ends the current run. */
   onFocusProgress: (finalize: boolean) => void;
   onPhaseChange?: (phase: TimerPhase) => void;
-  /** Fired when a focus session starts — walk avatar to last seat. */
+  /** Fired when a focus session starts — teleport avatar to last seat. */
   onFocusStart?: () => void;
 }
 
@@ -108,7 +108,7 @@ export default function FocusTimer({
       if (left <= 0) handlePhaseEnd();
     };
     tick();
-    const id = setInterval(tick, 250);
+    const id = setInterval(tick, 100);
     return () => clearInterval(id);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [endsAt]);
