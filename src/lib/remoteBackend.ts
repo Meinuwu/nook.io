@@ -272,6 +272,108 @@ async function ensureUniqueUsername(base: string, excludeUserId?: string): Promi
   }
 }
 
+type ProfileHints = {
+  email?: string;
+  username?: string;
+  pendingInviterUserId?: string | null;
+};
+
+function buildProfileRow(
+  userId: string,
+  email: string,
+  username: string,
+  pendingInviterUserId: string | null = null
+): ProfileRow {
+  return {
+    user_id: userId,
+    email,
+    display_name: username,
+    username,
+    avatar_config: { ...DEFAULT_AVATAR_CONFIG },
+    avatar_created: false,
+    profile_photo_url: null,
+    bio: "",
+    online_status: "auto",
+    last_active_at: Date.now(),
+    pending_inviter_user_id: pendingInviterUserId,
+    show_stats: true,
+    show_achievements: true,
+    show_friends: true,
+    auto_accept_friends: false,
+  };
+}
+
+async function ensureProfileForUser(
+  userId: string,
+  hints: ProfileHints = {}
+): Promise<Profile> {
+  const existing = await fetchProfile(userId);
+  if (existing) {
+    if (
+      hints.pendingInviterUserId &&
+      hints.pendingInviterUserId !== userId &&
+      !existing.pendingInviterUserId
+    ) {
+      const { data, error } = await db
+        .from("profiles")
+        .update({ pending_inviter_user_id: hints.pendingInviterUserId })
+        .eq("user_id", userId)
+        .select("*")
+        .single();
+      if (!error && data) return rowToProfile(data as ProfileRow);
+    }
+    return existing;
+  }
+
+  const {
+    data: { user },
+    error: userErr,
+  } = await db.auth.getUser();
+  if (userErr || !user || user.id !== userId) {
+    throw new Error("Could not load your account. Try signing out and back in.");
+  }
+
+  const email = (hints.email ?? user.email ?? "").trim().toLowerCase();
+  const metaUsername =
+    hints.username ??
+    (typeof user.user_metadata?.username === "string"
+      ? user.user_metadata.username
+      : undefined);
+
+  let username: string;
+  if (metaUsername?.trim()) {
+    username = normalizeUsername(metaUsername);
+    if (!/^[a-z0-9_]{3,20}$/.test(username)) {
+      username = await ensureUniqueUsername(email.split("@")[0] || "friend", userId);
+    } else {
+      const taken = await findProfileByUsername(username);
+      if (taken && taken.userId !== userId) {
+        username = await ensureUniqueUsername(username, userId);
+      }
+    }
+  } else {
+    username = await ensureUniqueUsername(email.split("@")[0] || "friend", userId);
+  }
+
+  const inviterId =
+    hints.pendingInviterUserId && hints.pendingInviterUserId !== userId
+      ? hints.pendingInviterUserId
+      : null;
+
+  const profileRow = buildProfileRow(userId, email, username, inviterId);
+  const { error: insertErr } = await db.from("profiles").insert(profileRow);
+  if (insertErr) {
+    const retry = await fetchProfile(userId);
+    if (retry) return retry;
+    console.error("[nook] Profile create failed:", insertErr.message);
+    throw new Error(
+      "Your account exists but setup failed. Try again in a moment or contact support."
+    );
+  }
+
+  return rowToProfile(profileRow);
+}
+
 async function createAcceptedFriendship(userA: string, userB: string): Promise<Friendship> {
   const { data: existingRows, error: findErr } = await db
     .from("friendships")
@@ -425,40 +527,35 @@ export async function signUp(
 
   const inviterUserId = await resolveInviterId(inviter);
 
-  const { data, error } = await db.auth.signUp({ email: normalized, password });
+  const { data, error } = await db.auth.signUp({
+    email: normalized,
+    password,
+    options: {
+      data: {
+        username,
+        display_name: username,
+      },
+    },
+  });
   if (error) throw new Error(error.message);
   if (!data.user) throw new Error("Sign up failed — please try again.");
+
+  const userId = data.user.id;
+  const resolvedInviter =
+    inviterUserId && inviterUserId !== userId ? inviterUserId : null;
+
   if (!data.session) {
     throw new Error(
       "Check your email to confirm your account, or disable email confirmation in Supabase Auth settings."
     );
   }
 
-  const userId = data.user.id;
-  const profileRow = {
-    user_id: userId,
-    email: normalized,
-    display_name: username,
-    username,
-    avatar_config: { ...DEFAULT_AVATAR_CONFIG },
-    avatar_created: false,
-    profile_photo_url: null,
-    bio: "",
-    online_status: "auto",
-    last_active_at: Date.now(),
-    pending_inviter_user_id:
-      inviterUserId && inviterUserId !== userId ? inviterUserId : null,
-    show_stats: true,
-    show_achievements: true,
-    show_friends: true,
-    auto_accept_friends: false,
-  };
-
-  const { error: profileErr } = await db.from("profiles").insert(profileRow);
-  if (profileErr) throw new Error(profileErr.message);
-
   setSession({ userId });
-  return rowToProfile(profileRow as ProfileRow);
+  return ensureProfileForUser(userId, {
+    email: normalized,
+    username,
+    pendingInviterUserId: resolvedInviter,
+  });
 }
 
 export async function login(email: string, password: string): Promise<Profile> {
@@ -470,9 +567,7 @@ export async function login(email: string, password: string): Promise<Profile> {
   if (error) throw new Error("Incorrect email or password.");
   const userId = data.user.id;
   setSession({ userId });
-  const profile = await fetchProfile(userId);
-  if (!profile) throw new Error("Profile not found.");
-  return profile;
+  return ensureProfileForUser(userId, { email: normalized });
 }
 
 export async function logout(): Promise<void> {
@@ -481,7 +576,17 @@ export async function logout(): Promise<void> {
 }
 
 export async function getProfile(userId: string): Promise<Profile | null> {
-  return fetchProfile(userId);
+  const profile = await fetchProfile(userId);
+  if (profile) return profile;
+  if (getMyUserId() === userId) {
+    try {
+      return await ensureProfileForUser(userId);
+    } catch (err) {
+      console.warn("[nook] Could not auto-create profile:", err);
+      return null;
+    }
+  }
+  return null;
 }
 
 export async function updateAvatarConfig(

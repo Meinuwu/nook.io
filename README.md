@@ -30,7 +30,10 @@ Open the printed URL (default http://localhost:1420).
 ### Production / multi-user (Supabase)
 
 1. Create a free project at [supabase.com](https://supabase.com).
-2. Run `supabase/schema.sql` in the SQL editor.
+2. Run `supabase/schema.sql` in the SQL editor (idempotent — safe to re-run).
+   If you already applied an older schema, run `supabase/migration-study-sessions.sql`
+   instead to add the `study_sessions` table. For existing auth users missing profiles,
+   run `supabase/migration-profile-trigger.sql`.
 3. In **Authentication → Providers → Email**, disable **Confirm email** (instant sign-up).
 4. In **Authentication → URL Configuration**, add **Redirect URLs**:
    `https://nook-io.vercel.app/reset-password` and `http://localhost:1420/reset-password`.
@@ -69,7 +72,7 @@ src/
   components/   VinylAvatar, CharacterBuilder, PhaserRoom, FocusTimer, NookLogo
   game/         StudyRoomScene (Phaser)
   lib/          backend, mockBackend, useAuth, avatarTypes, avatarCatalog
-supabase/       schema.sql for shared backend
+supabase/       schema.sql (+ migration SQL for existing DBs)
 src-tauri/      Tauri 2 desktop shell
 ```
 
