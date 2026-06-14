@@ -7,8 +7,9 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import * as backend from "./mockBackend";
-import type { Profile, ProfileUpdate } from "./mockBackend";
+import * as backend from "./backend";
+import { initBackend } from "./backend";
+import type { Profile, ProfileUpdate } from "./backend";
 import type { AvatarConfig } from "./avatarTypes";
 
 interface AuthState {
@@ -34,6 +35,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [loading, setLoading] = useState(true);
 
   const loadFromSession = useCallback(async () => {
+    await initBackend();
     const session = backend.getSession();
     if (session) {
       const p = await backend.getProfile(session.userId);

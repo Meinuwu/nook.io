@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import PageHeader from "../components/PageHeader";
 import Toggle from "../components/Toggle";
 import { useAuth } from "../lib/useAuth";
-import { STREAK_MIN_MINUTES, syncOnlineStatus, type OnlineStatusMode } from "../lib/mockBackend";
+import { STREAK_MIN_MINUTES, syncOnlineStatus, type OnlineStatusMode } from "../lib/backend";
 import { usePreferences } from "../lib/preferences";
 import { APP_VERSION_LABEL } from "../lib/appInfo";
 

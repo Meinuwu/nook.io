@@ -3,7 +3,7 @@ import { useEffect } from "react";
 import BottomNav from "./BottomNav";
 import { handleUiClickSound } from "../lib/sfx";
 import { useAuth } from "../lib/useAuth";
-import { syncLastActive } from "../lib/mockBackend";
+import { syncLastActive } from "../lib/backend";
 
 export default function AppShell() {
   const { profile } = useAuth();

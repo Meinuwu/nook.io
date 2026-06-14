@@ -3,7 +3,8 @@ import { useLocation, useNavigate } from "react-router-dom";
 import PageHeader from "../components/PageHeader";
 import ProfileAvatar from "../components/ProfileAvatar";
 import { useAuth } from "../lib/useAuth";
-import * as backend from "../lib/mockBackend";
+import * as backend from "../lib/backend";
+import { isSharedBackend, refreshUserSearch } from "../lib/backend";
 
 type Tab = "search" | "mailbox" | "friends";
 
@@ -44,6 +45,10 @@ export default function FriendsPage() {
     const q = searchQuery.trim();
     if (q.length < 1) {
       setSearchResults([]);
+      return;
+    }
+    if (isSharedBackend()) {
+      void refreshUserSearch(q, profile.userId).then(setSearchResults);
       return;
     }
     setSearchResults(backend.searchUsersByUsername(q, profile.userId));

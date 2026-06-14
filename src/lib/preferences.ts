@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { getMyUserId, syncPrivacySettings, type PrivacySettings } from "./mockBackend";
+import { getMyUserId, syncPrivacySettings, type PrivacySettings } from "./backend";
 
 export interface Preferences extends PrivacySettings {
   soundEffects: boolean;

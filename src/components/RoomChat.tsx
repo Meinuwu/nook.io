@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import type { ChatMessage } from "../lib/mockBackend";
+import type { ChatMessage } from "../lib/backend";
 
 interface RoomChatProps {
   messages: ChatMessage[];

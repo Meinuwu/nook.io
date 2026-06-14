@@ -3,9 +3,10 @@ import { useLocation, useNavigate } from "react-router-dom";
 import PageHeader from "../components/PageHeader";
 import ProfileAvatar from "../components/ProfileAvatar";
 import { useAuth } from "../lib/useAuth";
-import * as backend from "../lib/mockBackend";
-import type { UserNookSummary } from "../lib/mockBackend";
+import * as backend from "../lib/backend";
+import type { UserNookSummary } from "../lib/backend";
 import { VALID_CAPACITIES } from "../game/roomLayout";
+import { consumePendingJoinCode } from "./JoinPage";
 import { APP_VERSION_LABEL } from "../lib/appInfo";
 
 const CAPACITY_OPTIONS = VALID_CAPACITIES;
@@ -137,6 +138,16 @@ export default function HomePage() {
     refresh();
     return backend.subscribeToUserNooks(uid, refresh);
   }, [userId]);
+
+  useEffect(() => {
+    if (!profile?.avatarCreated) return;
+    const pending = consumePendingJoinCode();
+    if (!pending) return;
+    void (async () => {
+      const room = await backend.findRoomByCode(pending);
+      if (room) navigate(`/room/${room.id}`);
+    })();
+  }, [profile?.avatarCreated, navigate]);
 
   useEffect(() => {
     if (selectionMode && userNooks.length === 0) {

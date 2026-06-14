@@ -1,6 +1,6 @@
 import PageHeader from "../components/PageHeader";
 import { useAuth } from "../lib/useAuth";
-import * as backend from "../lib/mockBackend";
+import * as backend from "../lib/backend";
 import {
   ACHIEVEMENTS,
   RARITY_LABELS,

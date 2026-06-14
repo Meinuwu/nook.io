@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import PageHeader from "../components/PageHeader";
 import ProfileAvatar from "../components/ProfileAvatar";
 import { useAuth } from "../lib/useAuth";
-import * as backend from "../lib/mockBackend";
+import * as backend from "../lib/backend";
 
 const METRICS: backend.LeaderboardMetric[] = [
   "streak",

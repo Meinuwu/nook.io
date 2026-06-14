@@ -4,8 +4,9 @@ A cozy virtual study room where you focus alongside friends. Pick your vinyl-toy
 avatar, join a room, start a focus timer, and study together in a warm,
 Animal-Crossing-inspired space.
 
-This is **v1**: the core study-together loop, running entirely on a local mock
-backend (no external accounts or services required).
+This is **v1**: the core study-together loop. Without Supabase env vars it runs on a
+local mock backend; with Supabase configured (recommended for production) friends and
+nook joining work across browsers and users.
 
 ## Tech stack
 
@@ -13,8 +14,9 @@ backend (no external accounts or services required).
 - **Tailwind CSS** — warm, cozy design tokens (cream / sage / peach palette)
 - **Phaser 3** — the live virtual study room (desks, plants, avatars, lamp glow)
 - **Tauri 2** — desktop packaging (optional; see below)
-- **Local mock backend** — `src/lib/mockBackend.ts` stands in for Supabase
-  (auth + database + realtime) using `localStorage` and `BroadcastChannel`
+- **Local mock backend** — `src/lib/mockBackend.ts` for offline / dev fallback
+- **Supabase (optional)** — shared auth, profiles, friends, rooms, and realtime when
+  `VITE_SUPABASE_URL` + `VITE_SUPABASE_ANON_KEY` are set (`src/lib/backend.ts`)
 
 ## Getting started (web)
 
@@ -23,10 +25,19 @@ npm install
 npm run dev
 ```
 
-Open the printed URL (default http://localhost:1420). Everything runs in the
-browser — no backend setup needed.
+Open the printed URL (default http://localhost:1420).
 
-### Try studying "together"
+### Production / multi-user (Supabase)
+
+1. Create a free project at [supabase.com](https://supabase.com).
+2. Run `supabase/schema.sql` in the SQL editor.
+3. In **Authentication → Providers → Email**, disable **Confirm email** (instant sign-up).
+4. Copy `.env.example` → `.env.local` and fill in your project URL + anon key.
+5. Set the same env vars in Vercel → Settings → Environment Variables, then redeploy.
+
+Without Supabase, friends and room codes only work in the **same browser** (localStorage).
+
+### Try studying "together" (local mock)
 
 The mock backend syncs across browser tabs via `BroadcastChannel`:
 
@@ -55,7 +66,8 @@ src/
   pages/        Splash, Auth, Onboarding, Home, CharacterBuilder, StudyRoom
   components/   VinylAvatar, CharacterBuilder, PhaserRoom, FocusTimer, NookLogo
   game/         StudyRoomScene (Phaser)
-  lib/          mockBackend, useAuth, avatarTypes, avatarCatalog
+  lib/          backend, mockBackend, useAuth, avatarTypes, avatarCatalog
+supabase/       schema.sql for shared backend
 src-tauri/      Tauri 2 desktop shell
 ```
 

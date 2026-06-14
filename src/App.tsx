@@ -12,6 +12,7 @@ import StudyRoomPage from "./pages/StudyRoomPage";
 import AchievementsPage from "./pages/AchievementsPage";
 import FriendsPage from "./pages/FriendsPage";
 import EditProfilePage from "./pages/EditProfilePage";
+import JoinPage from "./pages/JoinPage";
 import LeaderboardPage from "./pages/LeaderboardPage";
 import type { ReactNode } from "react";
 
@@ -61,6 +62,7 @@ function AppRoutes() {
         <Route path="/achievements" element={<AchievementsPage />} />
         <Route path="/character" element={<CharacterBuilderPage />} />
       </Route>
+      <Route path="/join/:code" element={<JoinPage />} />
       <Route
         path="/room/:roomId"
         element={

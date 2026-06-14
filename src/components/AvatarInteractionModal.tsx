@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import ProfileAvatar from "./ProfileAvatar";
-import * as backend from "../lib/mockBackend";
-import type { PublicUserCard } from "../lib/mockBackend";
+import * as backend from "../lib/backend";
+import { refreshPublicUserCard } from "../lib/backend";
+import type { PublicUserCard } from "../lib/backend";
 
 interface AvatarInteractionModalProps {
   /** The clicked avatar's user id. */
@@ -42,9 +43,10 @@ export default function AvatarInteractionModal({
   const [error, setError] = useState<string | null>(null);
 
   const refresh = useCallback(() => {
-    const next = backend.getPublicUserCard(currentUserId, userId, roomId);
-    setCard(next);
-    setLoaded(true);
+    void refreshPublicUserCard(currentUserId, userId, roomId).then((next) => {
+      setCard(next);
+      setLoaded(true);
+    });
   }, [currentUserId, userId, roomId]);
 
   useEffect(() => {

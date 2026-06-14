@@ -6,8 +6,9 @@ import RoomChat from "../components/RoomChat";
 import RoomStudyLeaderboard from "../components/RoomStudyLeaderboard";
 import AvatarInteractionModal from "../components/AvatarInteractionModal";
 import { useAuth } from "../lib/useAuth";
-import * as backend from "../lib/mockBackend";
-import type { Room, RoomMember, ChatMessage } from "../lib/mockBackend";
+import * as backend from "../lib/backend";
+import { buildRoomShareUrl, initBackend, refreshRoomMembers, refreshChat } from "../lib/backend";
+import type { Room, RoomMember, ChatMessage } from "../lib/backend";
 import type { PresenceStatus } from "../lib/avatarTypes";
 
 export default function StudyRoomPage() {
@@ -34,17 +35,18 @@ export default function StudyRoomPage() {
   const isSeated = (myMember?.deskSlot ?? -1) >= 0;
 
   const refreshMembers = useCallback(() => {
-    setMembers(backend.getRoomMembers(roomId));
+    void refreshRoomMembers(roomId).then(setMembers);
   }, [roomId]);
 
-  const refreshChat = useCallback(() => {
-    setChatMessages(backend.getChatMessages(roomId));
+  const refreshChatMessages = useCallback(() => {
+    void refreshChat(roomId).then(setChatMessages);
   }, [roomId]);
 
   useEffect(() => {
     if (!profile) return;
     let active = true;
     (async () => {
+      await initBackend();
       const r = await backend.getRoom(roomId);
       if (!active) return;
       if (!r) {
@@ -55,13 +57,13 @@ export default function StudyRoomPage() {
       setRoom(r);
       await backend.joinRoom(roomId, profile);
       refreshMembers();
-      refreshChat();
+      refreshChatMessages();
       backend.checkStudyBuddyAchievement(roomId, profile.userId);
       setLoading(false);
     })();
 
     const unsubMembers = backend.subscribeToRoom(roomId, refreshMembers);
-    const unsubChat = backend.subscribeToChat(roomId, refreshChat);
+    const unsubChat = backend.subscribeToChat(roomId, refreshChatMessages);
     return () => {
       active = false;
       unsubMembers();
@@ -69,7 +71,7 @@ export default function StudyRoomPage() {
       backend.commitFocusProgress(roomId, profile.userId, true);
       backend.leaveRoom(roomId, profile.userId);
     };
-  }, [roomId, profile, refreshMembers, refreshChat]);
+  }, [roomId, profile, refreshMembers, refreshChatMessages]);
 
   const handleSeatClick = useCallback(
     async (slot: number) => {
@@ -93,9 +95,9 @@ export default function StudyRoomPage() {
     async (text: string) => {
       if (!profile) return;
       await backend.sendChatMessage(roomId, profile.userId, profile.displayName, text);
-      refreshChat();
+      refreshChatMessages();
     },
-    [roomId, profile, refreshChat]
+    [roomId, profile, refreshChatMessages]
   );
 
   const setStatus = useCallback(
@@ -135,7 +137,10 @@ export default function StudyRoomPage() {
 
   function copyCode() {
     if (!room) return;
-    navigator.clipboard?.writeText(room.code).catch(() => {});
+    const shareUrl = buildRoomShareUrl(room.code);
+    navigator.clipboard?.writeText(shareUrl).catch(() => {
+      navigator.clipboard?.writeText(room.code).catch(() => {});
+    });
     setCopied(true);
     setTimeout(() => setCopied(false), 1500);
   }
@@ -227,7 +232,7 @@ export default function StudyRoomPage() {
                 {room.code}
               </span>
               <span className="text-xs font-bold text-peach">
-                {copied ? "Copied!" : "Copy"}
+                {copied ? "Link copied!" : "Copy link"}
               </span>
             </button>
             <span className="rounded-full bg-white/90 px-3 py-1 text-xs font-bold text-brown/70 shadow-cozy">

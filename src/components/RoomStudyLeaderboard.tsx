@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
-import * as backend from "../lib/mockBackend";
-import type { RoomLeaderboardEntry, RoomLeaderboardPeriod, RoomMember } from "../lib/mockBackend";
+import * as backend from "../lib/backend";
+import type { RoomLeaderboardEntry, RoomLeaderboardPeriod, RoomMember } from "../lib/backend";
 import type { PresenceStatus } from "../lib/avatarTypes";
 
 interface RoomStudyLeaderboardProps {

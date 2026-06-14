@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import NookLogo from "../components/NookLogo";
 import { useAuth } from "../lib/useAuth";
-import { normalizeUsername } from "../lib/mockBackend";
+import { normalizeUsername } from "../lib/backend";
 
 type Mode = "login" | "signup";
 

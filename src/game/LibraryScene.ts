@@ -1,5 +1,5 @@
 import Phaser from "phaser";
-import type { RoomMember, ChatMessage } from "../lib/mockBackend";
+import type { RoomMember, ChatMessage } from "../lib/backend";
 import { getDisplayDpi } from "./displayDpi";
 import {
   C,

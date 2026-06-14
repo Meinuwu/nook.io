@@ -3,7 +3,7 @@ import Phaser from "phaser";
 import { LibraryScene, type TimerPhase } from "../game/LibraryScene";
 import { getDisplayDpi } from "../game/displayDpi";
 import { normalizeCapacity } from "../game/roomLayout";
-import type { RoomMember, ChatMessage } from "../lib/mockBackend";
+import type { RoomMember, ChatMessage } from "../lib/backend";
 
 export interface PhaserRoomHandle {
   /** Walk local user to their last assigned seat and sit down to study. */

@@ -1323,6 +1323,11 @@ function awardAchievement(userId: string, achievementId: string) {
   saveDb(db);
 }
 
+/** Public wrapper for shared-backend achievement hooks. */
+export function grantAchievement(userId: string, achievementId: string) {
+  awardAchievement(userId, achievementId);
+}
+
 export function getUserAchievements(userId: string): UserAchievement[] {
   return loadDb().achievements[userId] ?? [];
 }

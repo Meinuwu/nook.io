@@ -1,4 +1,4 @@
-const DOWNLOAD_URL = "https://nook.app";
+const DOWNLOAD_URL = "https://nook-io.vercel.app";
 
 export function buildShareMessage(
   username: string,

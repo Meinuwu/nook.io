@@ -5,7 +5,7 @@ import ProfileAvatar from "../components/ProfileAvatar";
 import StatusIndicator from "../components/StatusIndicator";
 import VinylAvatar from "../components/VinylAvatar";
 import { useAuth } from "../lib/useAuth";
-import * as backend from "../lib/mockBackend";
+import * as backend from "../lib/backend";
 import { shareProfile } from "../lib/shareProfile";
 import { APP_VERSION_LABEL } from "../lib/appInfo";
 
