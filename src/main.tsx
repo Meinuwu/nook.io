@@ -11,6 +11,11 @@ void initBackend().catch((err) => {
   console.error("[nook] Backend init failed:", err);
 });
 
+window.addEventListener("unhandledrejection", (event) => {
+  console.warn("[nook] Unhandled promise rejection:", event.reason);
+  event.preventDefault();
+});
+
 class AppErrorBoundary extends Component<
   { children: ReactNode },
   { error: Error | null }
@@ -25,6 +30,10 @@ class AppErrorBoundary extends Component<
     console.error("[nook] App crashed:", error, info.componentStack);
   }
 
+  private reset = () => {
+    this.setState({ error: null });
+  };
+
   render() {
     if (this.state.error) {
       return (
@@ -33,18 +42,24 @@ class AppErrorBoundary extends Component<
         >
           <h1 className="text-olive text-xl font-bold">Something went wrong</h1>
           <p className="text-olive/80 max-w-md text-sm">
-            Nook hit an unexpected error. Try refreshing the page. If you just
-            added Supabase settings, double-check{" "}
-            <code className="text-xs">VITE_SUPABASE_URL</code> and{" "}
-            <code className="text-xs">VITE_SUPABASE_ANON_KEY</code> in Vercel.
+            Nook hit an unexpected error. Try again or refresh the page.
           </p>
-          <button
-            type="button"
-            className="rounded-full bg-olive px-5 py-2 text-sm font-semibold text-cream"
-            onClick={() => window.location.reload()}
-          >
-            Reload
-          </button>
+          <div className="flex gap-3">
+            <button
+              type="button"
+              className="rounded-full bg-cream px-5 py-2 text-sm font-semibold text-brown shadow-cozy"
+              onClick={this.reset}
+            >
+              Try again
+            </button>
+            <button
+              type="button"
+              className="rounded-full bg-olive px-5 py-2 text-sm font-semibold text-cream"
+              onClick={() => window.location.reload()}
+            >
+              Reload
+            </button>
+          </div>
         </div>
       );
     }

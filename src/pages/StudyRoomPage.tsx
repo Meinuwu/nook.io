@@ -27,6 +27,8 @@ export default function StudyRoomPage() {
   const [timerPhase, setTimerPhase] = useState<TimerPhase>("idle");
   const [selectedUserId, setSelectedUserId] = useState<string | null>(null);
   const phaserRoomRef = useRef<PhaserRoomHandle>(null);
+  const profileRef = useRef(profile);
+  profileRef.current = profile;
 
   const myMember = useMemo(
     () => members.find((m) => m.userId === profile?.userId),
@@ -35,18 +37,25 @@ export default function StudyRoomPage() {
   const isSeated = (myMember?.deskSlot ?? -1) >= 0;
 
   const refreshMembers = useCallback(() => {
-    void refreshRoomMembers(roomId).then(setMembers);
+    void refreshRoomMembers(roomId)
+      .then(setMembers)
+      .catch((err) => console.warn("[nook] refresh members failed:", err));
   }, [roomId]);
 
   const refreshChatMessages = useCallback(() => {
-    void refreshChat(roomId).then(setChatMessages);
+    void refreshChat(roomId)
+      .then(setChatMessages)
+      .catch((err) => console.warn("[nook] refresh chat failed:", err));
   }, [roomId]);
 
   useEffect(() => {
-    if (!profile) return;
+    if (!profile?.userId) return;
+    const userId = profile.userId;
     let active = true;
     (async () => {
       await initBackend();
+      const currentProfile = profileRef.current;
+      if (!currentProfile) return;
       const r = await backend.getRoom(roomId);
       if (!active) return;
       if (!r) {
@@ -55,10 +64,10 @@ export default function StudyRoomPage() {
         return;
       }
       setRoom(r);
-      await backend.joinRoom(roomId, profile);
+      await backend.joinRoom(roomId, currentProfile);
       refreshMembers();
       refreshChatMessages();
-      backend.checkStudyBuddyAchievement(roomId, profile.userId);
+      backend.checkStudyBuddyAchievement(roomId, userId);
       setLoading(false);
     })();
 
@@ -68,10 +77,12 @@ export default function StudyRoomPage() {
       active = false;
       unsubMembers();
       unsubChat();
-      backend.commitFocusProgress(roomId, profile.userId, true);
-      backend.leaveRoom(roomId, profile.userId);
+      backend.commitFocusProgress(roomId, userId, true);
+      void backend.leaveRoom(roomId, userId).catch((err) => {
+        console.warn("[nook] leaveRoom failed:", err);
+      });
     };
-  }, [roomId, profile, refreshMembers, refreshChatMessages]);
+  }, [roomId, profile?.userId, refreshMembers, refreshChatMessages]);
 
   const handleSeatClick = useCallback(
     async (slot: number) => {

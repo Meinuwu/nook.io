@@ -32,8 +32,10 @@ Open the printed URL (default http://localhost:1420).
 1. Create a free project at [supabase.com](https://supabase.com).
 2. Run `supabase/schema.sql` in the SQL editor.
 3. In **Authentication → Providers → Email**, disable **Confirm email** (instant sign-up).
-4. Copy `.env.example` → `.env.local` and fill in your project URL + anon key.
-5. Set the same env vars in Vercel → Settings → Environment Variables, then redeploy.
+4. In **Authentication → URL Configuration**, add **Redirect URLs**:
+   `https://nook-io.vercel.app/reset-password` and `http://localhost:1420/reset-password`.
+5. Copy `.env.example` → `.env.local` and fill in your project URL + anon key.
+6. Set the same env vars in Vercel → Settings → Environment Variables, then redeploy.
 
 Without Supabase, friends and room codes only work in the **same browser** (localStorage).
 

@@ -4,6 +4,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
@@ -23,6 +24,8 @@ interface AuthState {
   ) => Promise<Profile>;
   login: (email: string, password: string) => Promise<Profile>;
   logout: () => Promise<void>;
+  resetPasswordForEmail: (email: string) => Promise<void>;
+  updatePassword: (newPassword: string) => Promise<void>;
   saveAvatar: (config: AvatarConfig, markCreated?: boolean) => Promise<void>;
   updateProfile: (update: ProfileUpdate) => Promise<void>;
   refresh: () => Promise<void>;
@@ -30,32 +33,66 @@ interface AuthState {
 
 const AuthContext = createContext<AuthState | null>(null);
 
+function profilesEqual(a: Profile | null, b: Profile | null): boolean {
+  if (!a || !b) return a === b;
+  return (
+    a.userId === b.userId &&
+    a.displayName === b.displayName &&
+    a.username === b.username &&
+    a.avatarCreated === b.avatarCreated &&
+    a.email === b.email
+  );
+}
+
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [profile, setProfile] = useState<Profile | null>(null);
   const [loading, setLoading] = useState(true);
+  const loadSeq = useRef(0);
 
   const loadFromSession = useCallback(async () => {
+    const seq = ++loadSeq.current;
     try {
       await initBackend();
       const session = backend.getSession();
       if (session) {
         const p = await backend.getProfile(session.userId);
-        setProfile(p);
+        if (seq !== loadSeq.current) return;
+        setProfile((prev) => (profilesEqual(prev, p) ? prev : p));
       } else {
+        if (seq !== loadSeq.current) return;
         setProfile(null);
       }
     } catch (err) {
       console.error("[nook] Failed to load auth session:", err);
-      setProfile(null);
+      if (seq !== loadSeq.current) return;
+      setProfile((prev) => prev);
     } finally {
-      setLoading(false);
+      if (seq === loadSeq.current) setLoading(false);
     }
   }, []);
 
   useEffect(() => {
-    loadFromSession();
-    const unsub = backend.onAuthChange(() => loadFromSession());
+    void loadFromSession();
+    const unsub = backend.onAuthChange(() => {
+      void loadFromSession();
+    });
     return unsub;
+  }, [loadFromSession]);
+
+  useEffect(() => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const onVisible = () => {
+      if (document.visibilityState !== "visible") return;
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        void loadFromSession();
+      }, 400);
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      clearTimeout(timer);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
   }, [loadFromSession]);
 
   const signUp = useCallback(
@@ -83,6 +120,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setProfile(null);
   }, []);
 
+  const resetPasswordForEmail = useCallback(async (email: string) => {
+    await backend.resetPasswordForEmail(email);
+  }, []);
+
+  const updatePassword = useCallback(async (newPassword: string) => {
+    await backend.updatePassword(newPassword);
+  }, []);
+
   const saveAvatar = useCallback(
     async (config: AvatarConfig, markCreated = true) => {
       if (!profile) return;
@@ -108,7 +153,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const refresh = useCallback(async () => {
     if (profile) {
       const p = await backend.getProfile(profile.userId);
-      setProfile(p);
+      setProfile((prev) => (profilesEqual(prev, p) ? prev : p));
     }
   }, [profile]);
 
@@ -119,11 +164,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       signUp,
       login,
       logout,
+      resetPasswordForEmail,
+      updatePassword,
       saveAvatar,
       updateProfile,
       refresh,
     }),
-    [profile, loading, signUp, login, logout, saveAvatar, updateProfile, refresh]
+    [
+      profile,
+      loading,
+      signUp,
+      login,
+      logout,
+      resetPasswordForEmail,
+      updatePassword,
+      saveAvatar,
+      updateProfile,
+      refresh,
+    ]
   );
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;

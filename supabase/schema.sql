@@ -1,5 +1,7 @@
 -- Nook shared backend schema (run in Supabase SQL editor)
 -- Disable email confirmation in Auth → Providers → Email for instant signup.
+-- Auth → URL Configuration → add redirect: https://nook-io.vercel.app/reset-password
+--   (and http://localhost:1420/reset-password for local dev)
 
 create table if not exists profiles (
   user_id uuid primary key references auth.users(id) on delete cascade,
@@ -77,6 +79,18 @@ create table if not exists direct_messages (
 
 create index if not exists direct_messages_pair_idx on direct_messages (from_user_id, to_user_id, created_at);
 
+create table if not exists study_sessions (
+  id text primary key,
+  user_id uuid not null references profiles(user_id) on delete cascade,
+  room_id text references rooms(id) on delete set null,
+  duration_seconds int not null default 0,
+  duration_minutes int not null default 0,
+  completed_at bigint not null
+);
+
+create index if not exists study_sessions_room_idx on study_sessions (room_id, completed_at);
+create index if not exists study_sessions_user_idx on study_sessions (user_id, completed_at);
+
 create table if not exists user_room_meta (
   user_id uuid not null references profiles(user_id) on delete cascade,
   room_id text not null,
@@ -91,6 +105,7 @@ alter table room_members enable row level security;
 alter table friendships enable row level security;
 alter table chat_messages enable row level security;
 alter table direct_messages enable row level security;
+alter table study_sessions enable row level security;
 alter table user_room_meta enable row level security;
 
 create policy "profiles_select" on profiles for select to authenticated using (true);
@@ -122,6 +137,10 @@ create policy "chat_insert" on chat_messages for insert to authenticated with ch
 create policy "dm_select" on direct_messages for select to authenticated
   using (auth.uid() = from_user_id or auth.uid() = to_user_id);
 create policy "dm_insert" on direct_messages for insert to authenticated with check (auth.uid() = from_user_id);
+
+create policy "study_sessions_select" on study_sessions for select to authenticated using (true);
+create policy "study_sessions_insert" on study_sessions for insert to authenticated with check (auth.uid() = user_id);
+create policy "study_sessions_update" on study_sessions for update to authenticated using (auth.uid() = user_id);
 
 create policy "user_room_meta_select" on user_room_meta for select to authenticated using (auth.uid() = user_id);
 create policy "user_room_meta_insert" on user_room_meta for insert to authenticated with check (auth.uid() = user_id);

@@ -12,6 +12,8 @@ import StudyRoomPage from "./pages/StudyRoomPage";
 import AchievementsPage from "./pages/AchievementsPage";
 import FriendsPage from "./pages/FriendsPage";
 import EditProfilePage from "./pages/EditProfilePage";
+import ForgotPasswordPage from "./pages/ForgotPasswordPage";
+import ResetPasswordPage from "./pages/ResetPasswordPage";
 import JoinPage from "./pages/JoinPage";
 import LeaderboardPage from "./pages/LeaderboardPage";
 import type { ReactNode } from "react";
@@ -46,6 +48,8 @@ function AppRoutes() {
     <Routes>
       <Route path="/" element={<SplashPage />} />
       <Route path="/auth" element={<AuthPage />} />
+      <Route path="/auth/forgot" element={<ForgotPasswordPage />} />
+      <Route path="/reset-password" element={<ResetPasswordPage />} />
       <Route
         path="/onboarding"
         element={

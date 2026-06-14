@@ -40,7 +40,6 @@ export {
   LEADERBOARD_METRIC_LABELS,
   formatAchievementProgress,
   formatStudyMinutes,
-  commitFocusProgress,
   recordSession,
   getStats,
   getStreak,
@@ -48,7 +47,6 @@ export {
   getAchievementProgress,
   getFriendLeaderboard,
   getFriendLeaderboardRank,
-  getRoomStudyLeaderboard,
   getVisibleFriends,
   getVisibleAchievementCount,
   canViewUserStats,
@@ -86,6 +84,10 @@ export async function initBackend(): Promise<void> {
 function r(): RemoteBackend {
   if (!remote) throw new Error("Shared backend not initialized — call initBackend() first.");
   return remote;
+}
+
+function useRemote(): boolean {
+  return remote != null;
 }
 
 export async function refreshUserSearch(query: string, selfUserId: string) {
@@ -145,6 +147,30 @@ export async function login(email: string, password: string): Promise<mock.Profi
 export async function logout(): Promise<void> {
   if (remote) return r().logout();
   return mock.logout();
+}
+
+export async function resetPasswordForEmail(email: string): Promise<void> {
+  if (remote) return r().resetPasswordForEmail(email);
+  throw new Error("Password reset requires Supabase — add VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY.");
+}
+
+export async function updatePassword(newPassword: string): Promise<void> {
+  if (remote) return r().updatePassword(newPassword);
+  throw new Error("Password reset requires Supabase — add VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY.");
+}
+
+export function commitFocusProgress(roomId: string, userId: string, finalize = false): void {
+  if (remote) return r().commitFocusProgress(roomId, userId, finalize);
+  return mock.commitFocusProgress(roomId, userId, finalize);
+}
+
+export function getRoomStudyLeaderboard(
+  roomId: string,
+  period: import("./mockBackend").RoomLeaderboardPeriod,
+  viewerId?: string
+): import("./mockBackend").RoomLeaderboardEntry[] {
+  if (remote) return r().getRoomStudyLeaderboard(roomId, period, viewerId);
+  return mock.getRoomStudyLeaderboard(roomId, period, viewerId);
 }
 
 export async function getProfile(userId: string): Promise<mock.Profile | null> {
@@ -395,23 +421,8 @@ export function checkStudyBuddyAchievement(roomId: string, userId: string): void
 
 /** Remote members + local per-device session seconds for live timers. */
 export function getRoomDailyStudySeconds(roomId: string): Record<string, number> {
-  if (!isSupabaseConfigured || !remote) return mock.getRoomDailyStudySeconds(roomId);
-
-  const now = Date.now();
-  const fromMock = mock.getRoomDailyStudySeconds(roomId);
-  const result: Record<string, number> = {};
-
-  for (const m of getRoomMembers(roomId)) {
-    if (fromMock[m.userId] != null) {
-      result[m.userId] = fromMock[m.userId];
-      continue;
-    }
-    result[m.userId] =
-      m.status === "studying" && m.focusStartedAt
-        ? Math.max(0, (now - m.focusStartedAt) / 1000)
-        : 0;
-  }
-  return result;
+  if (useRemote()) return r().getRoomDailyStudySeconds(roomId);
+  return mock.getRoomDailyStudySeconds(roomId);
 }
 
 export function buildRoomShareUrl(code: string): string {

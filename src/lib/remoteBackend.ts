@@ -24,6 +24,7 @@ import type {
   UserNookSummary,
   UserSearchResult,
 } from "./mockBackend";
+import type { RoomLeaderboardEntry, RoomLeaderboardPeriod } from "./mockBackend";
 import {
   normalizeUsername,
   validateUsername,
@@ -93,6 +94,44 @@ const authListeners = new Set<(session: Session | null) => void>();
 let cachedSession: Session | null = null;
 let authReady: Promise<void> | null = null;
 
+type StudySessionRow = {
+  id: string;
+  user_id: string;
+  room_id: string | null;
+  duration_seconds: number;
+  duration_minutes: number;
+  completed_at: number;
+};
+
+function sessionRowSeconds(row: StudySessionRow): number {
+  return row.duration_seconds ?? row.duration_minutes * 60;
+}
+
+async function safeRemote<T>(label: string, fn: () => Promise<T>, fallback: T): Promise<T> {
+  try {
+    return await fn();
+  } catch (err) {
+    console.warn(`[nook] ${label}:`, err);
+    return fallback;
+  }
+}
+
+function persistSession(session: Session | null) {
+  cachedSession = session;
+  if (session) localStorage.setItem(SESSION_KEY, JSON.stringify(session));
+  else localStorage.removeItem(SESSION_KEY);
+}
+
+function notifyAuthListeners(session: Session | null) {
+  authListeners.forEach((cb) => {
+    try {
+      cb(session);
+    } catch (err) {
+      console.warn("[nook] Auth listener failed:", err);
+    }
+  });
+}
+
 function uid(prefix = "id"): string {
   return `${prefix}_${Math.random().toString(36).slice(2, 10)}${Date.now().toString(36)}`;
 }
@@ -150,11 +189,9 @@ function rowToMember(row: MemberRow): RoomMember {
   };
 }
 
-function setSession(session: Session | null) {
-  cachedSession = session;
-  if (session) localStorage.setItem(SESSION_KEY, JSON.stringify(session));
-  else localStorage.removeItem(SESSION_KEY);
-  authListeners.forEach((cb) => cb(session));
+function setSession(session: Session | null, notify = true) {
+  persistSession(session);
+  if (notify) notifyAuthListeners(session);
 }
 
 function isRecentlyActive(profile: ProfileRow | null, updatedAt?: number): boolean {
@@ -306,12 +343,43 @@ export async function initRemoteBackend(): Promise<void> {
   if (authReady) return authReady;
   authReady = (async () => {
     const { data } = await db.auth.getSession();
-    setSession(data.session ? { userId: data.session.user.id } : null);
-    db.auth.onAuthStateChange((_event, session) => {
-      setSession(session ? { userId: session.user.id } : null);
+    setSession(data.session ? { userId: data.session.user.id } : null, false);
+    db.auth.onAuthStateChange((event, session) => {
+      const next = session ? { userId: session.user.id } : null;
+      const prevUserId = cachedSession?.userId ?? null;
+      persistSession(next);
+      if (event === "TOKEN_REFRESHED" && next?.userId === prevUserId) return;
+      if (event === "INITIAL_SESSION") return;
+      notifyAuthListeners(next);
     });
+    notifyAuthListeners(cachedSession);
   })();
   return authReady;
+}
+
+export async function resetPasswordForEmail(email: string): Promise<void> {
+  const normalized = email.trim().toLowerCase();
+  if (!normalized) throw new Error("Email is required.");
+  const origin =
+    typeof window !== "undefined" && window.location.origin
+      ? window.location.origin
+      : "https://nook-io.vercel.app";
+  const { error } = await db.auth.resetPasswordForEmail(normalized, {
+    redirectTo: `${origin}/reset-password`,
+  });
+  if (error) {
+    const msg = error.message.toLowerCase();
+    if (msg.includes("rate") || msg.includes("limit")) {
+      throw new Error("Too many attempts — wait a minute and try again.");
+    }
+    throw new Error("Could not send reset email. Check the address and try again.");
+  }
+}
+
+export async function updatePassword(newPassword: string): Promise<void> {
+  if (newPassword.length < 6) throw new Error("Password must be at least 6 characters.");
+  const { error } = await db.auth.updateUser({ password: newPassword });
+  if (error) throw new Error(error.message);
 }
 
 export function getSession(): Session | null {
@@ -700,9 +768,17 @@ const memberPollers = new Map<string, ReturnType<typeof setInterval>>();
 const memberChannels = new Map<string, ReturnType<typeof db.channel>>();
 
 function notifyRoom(roomId: string) {
-  void refreshRoomMembersCache(roomId).then(() => {
-    memberListeners.get(roomId)?.forEach((cb) => cb());
-  });
+  void safeRemote(`room members poll (${roomId})`, () => refreshRoomMembersCache(roomId), []).then(
+    () => {
+      memberListeners.get(roomId)?.forEach((cb) => {
+        try {
+          cb();
+        } catch (err) {
+          console.warn("[nook] Room listener failed:", err);
+        }
+      });
+    }
+  );
 }
 
 export function subscribeToRoom(roomId: string, cb: () => void): () => void {
@@ -792,13 +868,20 @@ export function getChatMessages(roomId: string): ChatMessage[] {
 }
 
 export async function refreshChatCache(roomId: string): Promise<ChatMessage[]> {
-  const messages = await loadChatMessages(roomId);
-  chatCache.set(roomId, messages);
-  return messages;
+  return safeRemote(
+    `load chat (${roomId})`,
+    async () => {
+      const messages = await loadChatMessages(roomId);
+      chatCache.set(roomId, messages);
+      return messages;
+    },
+    chatCache.get(roomId) ?? []
+  );
 }
 
 const chatListeners = new Map<string, Set<() => void>>();
 const chatPollers = new Map<string, ReturnType<typeof setInterval>>();
+const chatChannels = new Map<string, ReturnType<typeof db.channel>>();
 
 export function subscribeToChat(roomId: string, cb: () => void): () => void {
   if (!chatListeners.has(roomId)) chatListeners.set(roomId, new Set());
@@ -806,13 +889,20 @@ export function subscribeToChat(roomId: string, cb: () => void): () => void {
 
   if (!chatPollers.has(roomId)) {
     const notify = () => {
-      void refreshChatCache(roomId).then(() => {
-        chatListeners.get(roomId)?.forEach((fn) => fn());
+      void safeRemote(`chat poll (${roomId})`, () => refreshChatCache(roomId), []).then(() => {
+        chatListeners.get(roomId)?.forEach((fn) => {
+          try {
+            fn();
+          } catch (err) {
+            console.warn("[nook] Chat listener failed:", err);
+          }
+        });
       });
     };
     notify();
     chatPollers.set(roomId, setInterval(notify, 2000));
-    db.channel(`room-chat:${roomId}`)
+    const channel = db
+      .channel(`room-chat:${roomId}`)
       .on(
         "postgres_changes",
         {
@@ -824,10 +914,18 @@ export function subscribeToChat(roomId: string, cb: () => void): () => void {
         notify
       )
       .subscribe();
+    chatChannels.set(roomId, channel);
   }
 
   return () => {
     chatListeners.get(roomId)?.delete(cb);
+    if (chatListeners.get(roomId)?.size === 0) {
+      chatListeners.delete(roomId);
+      clearInterval(chatPollers.get(roomId));
+      chatPollers.delete(roomId);
+      void chatChannels.get(roomId)?.unsubscribe();
+      chatChannels.delete(roomId);
+    }
   };
 }
 
@@ -1138,12 +1236,14 @@ async function loadSentRequests(userId: string): Promise<FriendRequestInfo[]> {
 }
 
 export async function refreshSocialCache(userId: string): Promise<void> {
-  const [friends, pending, sent] = await Promise.all([
-    loadFriends(userId),
-    loadPendingRequests(userId),
-    loadSentRequests(userId),
-  ]);
-  socialCache.set(userId, { friends, pending, sent });
+  await safeRemote(`social cache (${userId})`, async () => {
+    const [friends, pending, sent] = await Promise.all([
+      loadFriends(userId),
+      loadPendingRequests(userId),
+      loadSentRequests(userId),
+    ]);
+    socialCache.set(userId, { friends, pending, sent });
+  }, undefined);
 }
 
 export function getFriends(userId: string): FriendInfo[] {
@@ -1176,6 +1276,7 @@ export async function acceptFriendRequest(requestId: string, userId: string): Pr
     .eq("id", requestId);
   if (updateErr) throw new Error(updateErr.message);
   await refreshSocialCache(userId);
+  await refreshSocialCache(friendship.from_user_id);
 }
 
 export async function declineFriendRequest(requestId: string, userId: string): Promise<void> {
@@ -1212,7 +1313,17 @@ const friendListeners = new Map<string, Set<() => void>>();
 export function subscribeToFriends(userId: string, cb: () => void): () => void {
   if (!friendListeners.has(userId)) friendListeners.set(userId, new Set());
   friendListeners.get(userId)!.add(cb);
-  const notify = () => void refreshSocialCache(userId).then(cb);
+  const notify = () => {
+    void safeRemote(`friends poll (${userId})`, () => refreshSocialCache(userId), undefined).then(
+      () => {
+        try {
+          cb();
+        } catch (err) {
+          console.warn("[nook] Friends listener failed:", err);
+        }
+      }
+    );
+  };
   notify();
   const poll = setInterval(notify, 3000);
   db.channel(`friends:${userId}`)
@@ -1401,13 +1512,189 @@ export function checkStudyBuddyAchievement(roomId: string, userId: string): void
 }
 
 const membersCache = new Map<string, RoomMember[]>();
+const roomStudySessionsCache = new Map<string, StudySessionRow[]>();
+
+async function loadRoomStudySessions(roomId: string): Promise<StudySessionRow[]> {
+  const weekAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
+  const { data, error } = await db
+    .from("study_sessions")
+    .select("*")
+    .eq("room_id", roomId)
+    .gte("completed_at", weekAgo);
+  if (error) throw new Error(error.message);
+  return (data as StudySessionRow[] | null) ?? [];
+}
+
+export async function refreshRoomStudySessionsCache(roomId: string): Promise<StudySessionRow[]> {
+  return safeRemote(
+    `study sessions (${roomId})`,
+    async () => {
+      const rows = await loadRoomStudySessions(roomId);
+      roomStudySessionsCache.set(roomId, rows);
+      return rows;
+    },
+    roomStudySessionsCache.get(roomId) ?? []
+  );
+}
+
+async function commitFocusProgressAsync(
+  roomId: string,
+  userId: string,
+  finalize = false
+): Promise<void> {
+  const members = membersCache.get(roomId) ?? (await loadRoomMembers(roomId));
+  const member = members.find((m) => m.userId === userId);
+  if (!member) return;
+
+  let addedWholeMinutes = 0;
+  const startedAt = member.focusStartedAt;
+  const updates: Partial<MemberRow> = { updated_at: Date.now() };
+
+  if (startedAt != null) {
+    const elapsedSeconds = Math.max(0, Math.floor((Date.now() - startedAt) / 1000));
+    if (elapsedSeconds > 0) {
+      let sessionId = member.focusSessionId ?? uid("sess");
+      const { data: existing } = await db
+        .from("study_sessions")
+        .select("*")
+        .eq("id", sessionId)
+        .maybeSingle();
+      const prevSeconds = existing ? sessionRowSeconds(existing as StudySessionRow) : 0;
+      const totalSeconds = prevSeconds + elapsedSeconds;
+      const row = {
+        id: sessionId,
+        user_id: userId,
+        room_id: roomId,
+        duration_seconds: totalSeconds,
+        duration_minutes: Math.floor(totalSeconds / 60),
+        completed_at: Date.now(),
+      };
+      const { error: upsertErr } = await db.from("study_sessions").upsert(row);
+      if (upsertErr) throw new Error(upsertErr.message);
+
+      updates.focus_started_at = startedAt + elapsedSeconds * 1000;
+      updates.focus_session_id = sessionId;
+      member.focusStartedAt = updates.focus_started_at as number;
+      member.focusSessionId = sessionId;
+      addedWholeMinutes = Math.floor(totalSeconds / 60) - Math.floor(prevSeconds / 60);
+    }
+  }
+
+  if (finalize) {
+    updates.focus_session_id = null;
+    member.focusSessionId = null;
+  }
+
+  if (startedAt != null || finalize) {
+    const { error } = await db
+      .from("room_members")
+      .update(updates)
+      .eq("room_id", roomId)
+      .eq("user_id", userId);
+    if (error) throw new Error(error.message);
+    membersCache.set(roomId, members);
+  }
+
+  if (addedWholeMinutes > 0 || finalize) {
+    await refreshRoomStudySessionsCache(roomId);
+    notifyRoom(roomId);
+  }
+}
+
+export function commitFocusProgress(roomId: string, userId: string, finalize = false): void {
+  void commitFocusProgressAsync(roomId, userId, finalize).catch((err) => {
+    console.warn("[nook] commitFocusProgress failed:", err);
+  });
+}
+
+export function getRoomStudyLeaderboard(
+  roomId: string,
+  period: RoomLeaderboardPeriod,
+  viewerId?: string
+): RoomLeaderboardEntry[] {
+  const startOfToday = new Date(
+    new Date().getFullYear(),
+    new Date().getMonth(),
+    new Date().getDate()
+  ).getTime();
+  const weekAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
+  const cutoff = period === "daily" ? startOfToday : weekAgo;
+  const sessions = (roomStudySessionsCache.get(roomId) ?? []).filter(
+    (s) => s.completed_at >= cutoff
+  );
+
+  const rows = getRoomMembers(roomId).map((m) => {
+    const profile = profileCache.get(m.userId);
+    const isSelf = viewerId === m.userId;
+    const visible = isSelf || (profile?.show_stats ?? true);
+    const liveMinutes =
+      m.status === "studying" && m.focusStartedAt
+        ? Math.max(0, Date.now() - m.focusStartedAt) / (60 * 1000)
+        : 0;
+    const minutes = visible
+      ? sessions
+          .filter((s) => s.user_id === m.userId)
+          .reduce((sum, s) => sum + sessionRowSeconds(s) / 60, 0) + liveMinutes
+      : 0;
+    return {
+      userId: m.userId,
+      displayName: profile?.display_name ?? m.displayName,
+      username: profile?.username ?? m.displayName,
+      profilePhotoUrl: profile?.profile_photo_url ?? null,
+      onlineStatus: onlineStatusFromProfile(profile ?? null, m.updatedAt),
+      presenceStatus: m.status,
+      minutes,
+      statsHidden: !visible,
+      isSelf,
+    };
+  });
+
+  rows.sort((a, b) => {
+    if (a.statsHidden !== b.statsHidden) return a.statsHidden ? 1 : -1;
+    if (b.minutes !== a.minutes) return b.minutes - a.minutes;
+    return a.displayName.localeCompare(b.displayName);
+  });
+
+  return rows.map((row, index) => ({ ...row, rank: index + 1 }));
+}
+
+export function getRoomDailyStudySeconds(roomId: string): Record<string, number> {
+  const now = Date.now();
+  const startOfToday = new Date(
+    new Date().getFullYear(),
+    new Date().getMonth(),
+    new Date().getDate()
+  ).getTime();
+  const sessions = roomStudySessionsCache.get(roomId) ?? [];
+  const result: Record<string, number> = {};
+
+  for (const m of getRoomMembers(roomId)) {
+    const savedSeconds = sessions
+      .filter((s) => s.user_id === m.userId && s.completed_at >= startOfToday)
+      .reduce((sum, s) => sum + sessionRowSeconds(s), 0);
+    const liveSeconds =
+      m.status === "studying" && m.focusStartedAt
+        ? Math.max(0, (now - m.focusStartedAt) / 1000)
+        : 0;
+    result[m.userId] = savedSeconds + liveSeconds;
+  }
+  return result;
+}
 
 export function getRoomMembers(roomId: string): RoomMember[] {
   return membersCache.get(roomId) ?? [];
 }
 
 export async function refreshRoomMembersCache(roomId: string): Promise<RoomMember[]> {
-  const members = await loadRoomMembers(roomId);
-  membersCache.set(roomId, members);
-  return members;
+  return safeRemote(`load members (${roomId})`, async () => {
+    const members = await loadRoomMembers(roomId);
+    membersCache.set(roomId, members);
+    await Promise.all(
+      members.map((m) =>
+        fetchProfileRow(m.userId).catch(() => null)
+      )
+    );
+    void refreshRoomStudySessionsCache(roomId);
+    return members;
+  }, membersCache.get(roomId) ?? []);
 }
