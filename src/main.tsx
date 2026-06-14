@@ -18,9 +18,9 @@ window.addEventListener("unhandledrejection", (event) => {
 
 class AppErrorBoundary extends Component<
   { children: ReactNode },
-  { error: Error | null }
+  { error: Error | null; resetKey: number }
 > {
-  state = { error: null as Error | null };
+  state = { error: null as Error | null, resetKey: 0 };
 
   static getDerivedStateFromError(error: Error) {
     return { error };
@@ -31,11 +31,16 @@ class AppErrorBoundary extends Component<
   }
 
   private reset = () => {
-    this.setState({ error: null });
+    this.setState((prev) => ({
+      error: null,
+      resetKey: prev.resetKey + 1,
+    }));
   };
 
   render() {
     if (this.state.error) {
+      const showDetail =
+        import.meta.env.DEV || import.meta.env.VITE_SHOW_ERROR_DETAIL === "true";
       return (
         <div
           className="cozy-bg flex h-full min-h-screen flex-col items-center justify-center gap-4 p-6 text-center"
@@ -44,6 +49,11 @@ class AppErrorBoundary extends Component<
           <p className="text-olive/80 max-w-md text-sm">
             Nook hit an unexpected error. Try again or refresh the page.
           </p>
+          {showDetail && (
+            <p className="max-w-md break-all rounded-xl bg-cream/80 px-4 py-2 font-mono text-xs text-brown/80">
+              {this.state.error.message}
+            </p>
+          )}
           <div className="flex gap-3">
             <button
               type="button"
@@ -63,7 +73,9 @@ class AppErrorBoundary extends Component<
         </div>
       );
     }
-    return this.props.children;
+    return (
+      <React.Fragment key={this.state.resetKey}>{this.props.children}</React.Fragment>
+    );
   }
 }
 

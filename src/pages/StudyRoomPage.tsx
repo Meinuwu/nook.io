@@ -105,8 +105,12 @@ export default function StudyRoomPage() {
   const handleSendChat = useCallback(
     async (text: string) => {
       if (!profile) return;
-      await backend.sendChatMessage(roomId, profile.userId, profile.displayName, text);
-      refreshChatMessages();
+      try {
+        await backend.sendChatMessage(roomId, profile.userId, profile.displayName, text);
+        refreshChatMessages();
+      } catch (err) {
+        console.warn("[nook] send chat failed:", err);
+      }
     },
     [roomId, profile, refreshChatMessages]
   );

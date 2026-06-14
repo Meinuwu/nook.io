@@ -43,10 +43,15 @@ export default function AvatarInteractionModal({
   const [error, setError] = useState<string | null>(null);
 
   const refresh = useCallback(() => {
-    void refreshPublicUserCard(currentUserId, userId, roomId).then((next) => {
-      setCard(next);
-      setLoaded(true);
-    });
+    void refreshPublicUserCard(currentUserId, userId, roomId)
+      .then((next) => {
+        setCard(next);
+        setLoaded(true);
+      })
+      .catch((err) => {
+        console.warn("[nook] public user card failed:", err);
+        setLoaded(true);
+      });
   }, [currentUserId, userId, roomId]);
 
   useEffect(() => {

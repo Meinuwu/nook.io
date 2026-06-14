@@ -48,7 +48,12 @@ export default function FriendsPage() {
       return;
     }
     if (isSharedBackend()) {
-      void refreshUserSearch(q, profile.userId).then(setSearchResults);
+      void refreshUserSearch(q, profile.userId)
+        .then(setSearchResults)
+        .catch((err) => {
+          console.warn("[nook] User search failed:", err);
+          setSearchResults([]);
+        });
       return;
     }
     setSearchResults(backend.searchUsersByUsername(q, profile.userId));

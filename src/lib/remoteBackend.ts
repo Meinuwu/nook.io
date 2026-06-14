@@ -767,6 +767,10 @@ const memberListeners = new Map<string, Set<() => void>>();
 const memberPollers = new Map<string, ReturnType<typeof setInterval>>();
 const memberChannels = new Map<string, ReturnType<typeof db.channel>>();
 
+function removeRealtimeChannel(channel: ReturnType<typeof db.channel> | undefined) {
+  if (channel) void db.removeChannel(channel);
+}
+
 function notifyRoom(roomId: string) {
   void safeRemote(`room members poll (${roomId})`, () => refreshRoomMembersCache(roomId), []).then(
     () => {
@@ -807,7 +811,7 @@ export function subscribeToRoom(roomId: string, cb: () => void): () => void {
       memberListeners.delete(roomId);
       clearInterval(memberPollers.get(roomId));
       memberPollers.delete(roomId);
-      void memberChannels.get(roomId)?.unsubscribe();
+      removeRealtimeChannel(memberChannels.get(roomId));
       memberChannels.delete(roomId);
     }
   };
@@ -923,7 +927,7 @@ export function subscribeToChat(roomId: string, cb: () => void): () => void {
       chatListeners.delete(roomId);
       clearInterval(chatPollers.get(roomId));
       chatPollers.delete(roomId);
-      void chatChannels.get(roomId)?.unsubscribe();
+      removeRealtimeChannel(chatChannels.get(roomId));
       chatChannels.delete(roomId);
     }
   };
@@ -1001,17 +1005,41 @@ export async function refreshUserNooksCache(userId: string): Promise<UserNookSum
 }
 
 const userNooksListeners = new Map<string, Set<() => void>>();
+const userNooksPollers = new Map<string, ReturnType<typeof setInterval>>();
+
+function notifyUserNooks(userId: string) {
+  void safeRemote(
+    `user nooks (${userId})`,
+    () => refreshUserNooksCache(userId),
+    userNooksCache.get(userId) ?? []
+  ).then(() => {
+    userNooksListeners.get(userId)?.forEach((cb) => {
+      try {
+        cb();
+      } catch (err) {
+        console.warn("[nook] User nooks listener failed:", err);
+      }
+    });
+  });
+}
 
 export function subscribeToUserNooks(userId: string, cb: () => void): () => void {
   if (!userNooksListeners.has(userId)) userNooksListeners.set(userId, new Set());
   userNooksListeners.get(userId)!.add(cb);
-  const poll = setInterval(() => {
-    void refreshUserNooksCache(userId).then(cb);
-  }, 4000);
-  void refreshUserNooksCache(userId).then(cb);
+
+  if (!userNooksPollers.has(userId)) {
+    userNooksPollers.set(userId, setInterval(() => notifyUserNooks(userId), 4000));
+  }
+
+  notifyUserNooks(userId);
+
   return () => {
     userNooksListeners.get(userId)?.delete(cb);
-    clearInterval(poll);
+    if (userNooksListeners.get(userId)?.size === 0) {
+      userNooksListeners.delete(userId);
+      clearInterval(userNooksPollers.get(userId));
+      userNooksPollers.delete(userId);
+    }
   };
 }
 
@@ -1309,33 +1337,53 @@ export async function removeFriend(userId: string, friendId: string): Promise<vo
 }
 
 const friendListeners = new Map<string, Set<() => void>>();
+const friendPollers = new Map<string, ReturnType<typeof setInterval>>();
+const friendChannels = new Map<string, ReturnType<typeof db.channel>>();
 
-export function subscribeToFriends(userId: string, cb: () => void): () => void {
-  if (!friendListeners.has(userId)) friendListeners.set(userId, new Set());
-  friendListeners.get(userId)!.add(cb);
-  const notify = () => {
-    void safeRemote(`friends poll (${userId})`, () => refreshSocialCache(userId), undefined).then(
-      () => {
+function notifyFriends(userId: string) {
+  void safeRemote(`friends poll (${userId})`, () => refreshSocialCache(userId), undefined).then(
+    () => {
+      friendListeners.get(userId)?.forEach((cb) => {
         try {
           cb();
         } catch (err) {
           console.warn("[nook] Friends listener failed:", err);
         }
-      }
-    );
-  };
-  notify();
-  const poll = setInterval(notify, 3000);
-  db.channel(`friends:${userId}`)
-    .on(
-      "postgres_changes",
-      { event: "*", schema: "public", table: "friendships" },
-      notify
-    )
-    .subscribe();
+      });
+    }
+  );
+}
+
+export function subscribeToFriends(userId: string, cb: () => void): () => void {
+  if (!friendListeners.has(userId)) friendListeners.set(userId, new Set());
+  friendListeners.get(userId)!.add(cb);
+
+  // One channel per user — register .on() handlers before .subscribe(), never reuse
+  // a channel that is already subscribed (Supabase throws on late .on() calls).
+  if (!friendPollers.has(userId)) {
+    friendPollers.set(userId, setInterval(() => notifyFriends(userId), 3000));
+    const channel = db
+      .channel(`friends:${userId}`)
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "friendships" },
+        () => notifyFriends(userId)
+      )
+      .subscribe();
+    friendChannels.set(userId, channel);
+  }
+
+  notifyFriends(userId);
+
   return () => {
     friendListeners.get(userId)?.delete(cb);
-    clearInterval(poll);
+    if (friendListeners.get(userId)?.size === 0) {
+      friendListeners.delete(userId);
+      clearInterval(friendPollers.get(userId));
+      friendPollers.delete(userId);
+      removeRealtimeChannel(friendChannels.get(userId));
+      friendChannels.delete(userId);
+    }
   };
 }
 

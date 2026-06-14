@@ -57,7 +57,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (session) {
         const p = await backend.getProfile(session.userId);
         if (seq !== loadSeq.current) return;
-        setProfile((prev) => (profilesEqual(prev, p) ? prev : p));
+        if (p) {
+          setProfile((prev) => (profilesEqual(prev, p) ? prev : p));
+        }
       } else {
         if (seq !== loadSeq.current) return;
         setProfile(null);
@@ -151,9 +153,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   );
 
   const refresh = useCallback(async () => {
-    if (profile) {
+    if (!profile) return;
+    try {
       const p = await backend.getProfile(profile.userId);
-      setProfile((prev) => (profilesEqual(prev, p) ? prev : p));
+      if (p) {
+        setProfile((prev) => (profilesEqual(prev, p) ? prev : p));
+      }
+    } catch (err) {
+      console.warn("[nook] Profile refresh failed:", err);
     }
   }, [profile]);
 
