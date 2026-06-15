@@ -466,8 +466,10 @@
   }
 }
 
-/* Phaser study room — prevent browser upscaling of the canvas */
+/* Phaser study room — canvas fills host; layout is camera-scaled, not CSS-scaled */
 .phaser-room-host canvas {
   display: block;
   touch-action: none;
+  max-width: none;
+  max-height: none;
 }

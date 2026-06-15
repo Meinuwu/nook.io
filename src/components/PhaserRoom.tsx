@@ -44,10 +44,6 @@ function applyHiDpi(game: Phaser.Game, host: HTMLElement) {
   const bufferH = cssH * dpr;
 
   const canvas = game.canvas;
-  // Reassigning canvas.width/height resets the WebGL drawing buffer (a one-frame
-  // blank that reads as a black flash) and forces a full room rebuild, so only
-  // do that when the buffer size genuinely changed. A ResizeObserver can fire
-  // without a real size change; skipping those keeps the room perfectly stable.
   const sizeChanged = canvas.width !== bufferW || canvas.height !== bufferH;
 
   const scale = game.scale;
@@ -55,15 +51,16 @@ function applyHiDpi(game: Phaser.Game, host: HTMLElement) {
   scale.setZoom(1 / dpr);
   canvas.style.width = `${cssW}px`;
   canvas.style.height = `${cssH}px`;
-  if (!sizeChanged) return;
+  if (sizeChanged) {
+    scale.setGameSize(bufferW, bufferH);
+    canvas.width = bufferW;
+    canvas.height = bufferH;
+  }
 
-  scale.setGameSize(bufferW, bufferH);
-  canvas.width = bufferW;
-  canvas.height = bufferH;
-
+  // Room layout lives in fixed world units — viewport changes only refit the camera.
   const scene = game.scene.getScene("LibraryScene") as LibraryScene | undefined;
   if (scene?.sys?.isActive()) {
-    scene.handleResize();
+    scene.reframeRoom();
   }
 }
 
@@ -148,6 +145,8 @@ const PhaserRoom = forwardRef<PhaserRoomHandle, PhaserRoomProps>(function Phaser
     const ro = new ResizeObserver(onResize);
     ro.observe(host);
     window.addEventListener("resize", onResize);
+    window.visualViewport?.addEventListener("resize", onResize);
+    window.visualViewport?.addEventListener("scroll", onResize);
 
     const boot = () => {
       // Add the scene without auto-starting, then start it once with the real
@@ -192,6 +191,8 @@ const PhaserRoom = forwardRef<PhaserRoomHandle, PhaserRoomProps>(function Phaser
     return () => {
       ro.disconnect();
       window.removeEventListener("resize", onResize);
+      window.visualViewport?.removeEventListener("resize", onResize);
+      window.visualViewport?.removeEventListener("scroll", onResize);
       game.destroy(true);
       gameRef.current = null;
       sceneRef.current = null;

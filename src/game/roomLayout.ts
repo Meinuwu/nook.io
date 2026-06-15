@@ -35,9 +35,9 @@ export const CHAIR_HALF_W = 24 * FURNITURE_SCALE;
 export const CHAIR_BACK = 32 * FURNITURE_SCALE;
 export const CHAIR_FRONT = 16 * FURNITURE_SCALE;
 
-/** Padding around table+seats for the study rug. Generous so the study sits on
- * a large, prominent area rug that reads as the room's focal point. */
-export const RUG_PAD = 30 * FURNITURE_SCALE;
+/** Padding around table+seats for the study rug — tight enough that the study
+ * cluster reads as the dominant focal point without excess empty floor. */
+export const RUG_PAD = 26 * FURNITURE_SCALE;
 
 const ROUND_TABLE_SIZES: Record<number, Omit<RoundTableLayout, "shape" | "seatOffset">> = {
   1: { outerW: 80, outerH: 52, innerW: 64, innerH: 40 },
@@ -204,12 +204,12 @@ function studyZoneForCapacity(cap: RoomCapacity) {
   return { ...ZONES.study, y0: 0.4, y1: 0.8 };
 }
 
-// Study seating is the room's centrepiece: kept horizontally centred so the eye
-// lands on it first, with the lounge (left) and bookshelves (right) framing it.
+// Study seating is the room's centrepiece: nudged toward the visual hero zone
+// (slightly right of centre) so the camera frames the table cluster first.
 const DEFAULT_STUDY_CENTER: Record<CapacityTier, { x: number; y: number }> = {
-  small: { x: 0.5, y: 0.56 },
-  medium: { x: 0.5, y: 0.57 },
-  large: { x: 0.5, y: 0.58 },
+  small: { x: 0.54, y: 0.5 },
+  medium: { x: 0.53, y: 0.51 },
+  large: { x: 0.52, y: 0.52 },
 };
 
 /** Table shape and size for a room capacity — shared by LibraryScene and pathfinding. */
@@ -256,76 +256,57 @@ export function normalizeCapacity(capacity: number): RoomCapacity {
 }
 
 /**
- * Actual room footprint by capacity, as a fraction of the available canvas.
- * The room rect itself grows with the group: a compact, intimate nook at 1–2
- * people and the full library at 8. The walls, floor, furniture zones, rugs,
- * table and seats are all laid out relative to this rect, so the playable area
- * genuinely changes size (it is not faked with camera zoom). The remaining
- * canvas is filled with a darker backdrop so a small room reads as a cozy,
- * intentional space rather than a broken half-empty screen.
+ * Room world-size multiplier by capacity. Applied to the fixed reference rect
+ * (REFERENCE_ROOM_W/H) so furniture — which uses absolute pixel sizes — reads
+ * larger relative to the floor in small nooks and the room grows gently for
+ * bigger groups while staying cozy.
  */
 const ROOM_SCALE: Record<RoomCapacity, number> = {
-  1: 0.98,
-  2: 1.04,
-  3: 1.11,
-  // Room world size grows gently with capacity. The camera fits the whole rect
-  // on screen (see LibraryScene.applyRoomFraming), so a larger rect means the
-  // fixed-size furniture occupies proportionally less of the floor. The curve is
-  // kept tight (and paired with capacity-scaled decor) so density stays roughly
-  // constant — a small nook reads as full and a big library stays well-populated.
-  4: 1.18,
-  5: 1.26,
-  6: 1.33,
-  7: 1.39,
-  8: 1.45,
+  1: 0.7,
+  2: 0.74,
+  3: 0.8,
+  4: 0.86,
+  5: 0.93,
+  6: 0.98,
+  7: 1.02,
+  8: 1.06,
 };
 
 export function roomScaleForCapacity(capacity: number): number {
   return ROOM_SCALE[normalizeCapacity(capacity)] ?? 1.3;
 }
 
-/** Largest room scale across all capacities — the camera frames to this so the
- * biggest room just fits and smaller rooms render genuinely smaller/cozier. */
+/** Largest room scale across all capacities. */
 export function maxRoomScale(): number {
   return Math.max(...Object.values(ROOM_SCALE));
 }
+
+/** Fixed reference room rect (3:2) — layout lives in stable world units so
+ * resize and browser zoom only change the camera, never furniture proportions. */
+export const REFERENCE_ROOM_W = 840;
+export const REFERENCE_ROOM_H = 560;
 
 export interface RoomSize {
   w: number;
   h: number;
 }
 
-/**
- * Logical room rect for a capacity. Keeps the canvas aspect ratio so the room
- * always centers with an even backdrop border.
- */
-export function getRoomSize(
-  capacity: number,
-  canvasW: number,
-  canvasH: number
-): RoomSize {
+/** Logical room rect for a capacity in fixed world coordinates. */
+export function getRoomSize(capacity: number): RoomSize {
   const s = roomScaleForCapacity(capacity);
-  return { w: canvasW * s, h: canvasH * s };
+  return { w: REFERENCE_ROOM_W * s, h: REFERENCE_ROOM_H * s };
 }
 
-/**
- * Gentle camera zoom layered on top of the scaled room rect. This stays close
- * to 1.0 — it only nudges small nooks a touch closer so they feel intimate
- * without cancelling out the genuine room-size change. Net on-screen room size
- * (scale × zoom) still clearly grows from ~0.66 (1 person) to ~0.98 (8).
- */
+/** Gentle per-capacity camera nudge on top of the fit-to-viewport zoom. */
 const ROOM_ZOOMS: Record<RoomCapacity, number> = {
-  1: 1.1,
-  2: 1.09,
-  3: 1.08,
-  4: 1.06,
-  // Zoom in a touch more for big rooms so the trimmed rect still fills the
-  // screen and the furniture reads larger — net on-screen size (scale × zoom)
-  // stays ~0.89→1.0 across 5→8, but the interior feels snug rather than empty.
-  5: 1.08,
-  6: 1.1,
-  7: 1.12,
-  8: 1.14,
+  1: 1.04,
+  2: 1.03,
+  3: 1.02,
+  4: 1.01,
+  5: 1.0,
+  6: 1.0,
+  7: 0.99,
+  8: 0.98,
 };
 
 export function roomZoomForCapacity(capacity: number): number {
@@ -446,9 +427,9 @@ export function getFurniturePlan(capacity: number): FurniturePlan {
  * wall (either side of the windows) and the full right wall.
  */
 export const ZONES = {
-  lounge: { x0: 0, x1: 0.28, y0: 0.32, y1: 0.86 },
+  lounge: { x0: 0, x1: 0.3, y0: 0.34, y1: 0.8 },
   fireplace: { x0: 0.02, x1: 0.18, y0: 0.26, y1: 0.46 },
-  study: { x0: 0.38, x1: 0.82, y0: 0.42, y1: 0.76 },
+  study: { x0: 0.3, x1: 0.78, y0: 0.36, y1: 0.7 },
   shelfTop: { y0: 0, y1: 0.2 },
   shelfRight: { x0: 0.88, x1: 1.0 },
 } as const;
@@ -461,10 +442,10 @@ export const ZONES = {
  */
 export const L = {
   floorTop: 0.22,
-  loungeRugCx: 0.12,
-  loungeRugCy: 0.56,
-  loungeRugW: 0.3,
-  loungeRugH: 0.34,
+  loungeRugCx: 0.13,
+  loungeRugCy: 0.58,
+  loungeRugW: 0.28,
+  loungeRugH: 0.3,
   fireplaceX: 0.1,
   fireplaceY: 0.34,
   sofaHX: 0.04,
@@ -479,10 +460,10 @@ export const L = {
   sideTableRightY: 0.7,
   // Reading floor lamp now stands just left of the study (between the lounge and
   // the study cluster) to light the study area — no longer in the lounge.
-  floorLampX: 0.36,
+  floorLampX: 0.31,
   floorLampY: 0.5,
   pondCx: 0.5,
-  pondCy: 0.83,
+  pondCy: 0.79,
   shelfTopY: 0.02,
   shelfTopH: 0.17,
   shelfRightX: 0.9,
@@ -510,8 +491,8 @@ export const RIGHT_SHELVES = [
 
 // Plants along the right wall only — no floor decor in the campfire lounge.
 export const PLANT_SPOTS = [
-  { x: 0.84, y: 0.46, scale: 0.85, variant: "round" as const },
-  { x: 0.84, y: 0.7, scale: 0.8, variant: "yucca" as const },
+  { x: 0.82, y: 0.48, scale: 0.85, variant: "round" as const },
+  { x: 0.82, y: 0.66, scale: 0.8, variant: "yucca" as const },
 ] as const;
 
 /**
@@ -554,8 +535,8 @@ export function getCampfireLayout(
 ): CampfireLayout {
   const fireX = w * L.loungeRugCx;
   const fireY = h * (L.loungeRugCy + 0.03);
-  const radiusX = w * 0.078 * fireScale;
-  const radiusY = h * 0.062 * fireScale;
+  const radiusX = w * 0.072 * fireScale;
+  const radiusY = h * 0.058 * fireScale;
   const startAngle = Math.PI * 0.12;
   const endAngle = Math.PI * 0.88;
   const chairs: CampChairSpot[] = [];

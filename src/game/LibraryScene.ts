@@ -40,10 +40,10 @@ import {
   getStudyPlacement,
   getTableLayout,
   L,
-  maxRoomScale,
   normalizeCapacity,
   PLANT_SPOTS,
   RIGHT_SHELVES,
+  roomZoomForCapacity,
   studyCenter,
   TOP_SHELVES,
   type TableLayout,
@@ -61,6 +61,18 @@ const NAV_WALK_SPEED = 110;
 /** How often to refresh avatar study timers while a focus session is active. */
 const STUDY_TIMER_TICK_MS = 100;
 
+/** Per-frame movement is delta-scaled; clamp the delta so a long tab-away or a
+ * GC hitch can't translate into one giant teleport-like step (keeps WASD smooth
+ * and frame-rate independent without letting a single huge frame fling the
+ * avatar across the room / through obstacles). */
+const MAX_MOVE_DELTA_MS = 50;
+
+/** How long a locally chosen seat stays authoritative while we wait for the
+ * server (changeSeat) to confirm it. Stale realtime room syncs that arrive
+ * before the write commits are ignored for the local avatar during this window,
+ * which is what kills the seat-teleport "snap back" glitch. */
+const PENDING_SEAT_TTL_MS = 3000;
+
 /** Avatars sit above all furniture; per-avatar depth grows with y so lower
  * (nearer) characters draw in front and none vanish behind decor. */
 const AVATAR_BASE_DEPTH = 10;
@@ -75,6 +87,9 @@ const SIT_SINK = 7;
 /** Walkable floor stops at this fraction of room height, keeping avatars above
  * the screen region the camera reserves for the bottom timer/chat bar. */
 const FLOOR_WALK_BOTTOM = 0.9;
+
+/** Backdrop surround padding — large enough that resize never exposes edges. */
+const BACKDROP_VIEW_PAD = 4096;
 
 /** True when the focused element is a text field that should own keystrokes. */
 function isEditableTarget(el: EventTarget | Element | null): boolean {
@@ -244,6 +259,10 @@ export class LibraryScene extends Phaser.Scene {
   private floorZone: Phaser.GameObjects.Zone | null = null;
   private navGrid: NavGrid | null = null;
   private wanderTimer: Phaser.Time.TimerEvent | null = null;
+  /** Seat the local user just chose, held authoritative until the server echoes
+   * it back (or the TTL lapses) so stale realtime syncs can't snap them back. */
+  private pendingSeatSlot: number | null = null;
+  private pendingSeatTimer: Phaser.Time.TimerEvent | null = null;
   private keys: {
     W: Phaser.Input.Keyboard.Key;
     A: Phaser.Input.Keyboard.Key;
@@ -305,6 +324,8 @@ export class LibraryScene extends Phaser.Scene {
     this.floorZone = null;
     this.navGrid = null;
     this.wanderTimer = null;
+    this.pendingSeatSlot = null;
+    this.pendingSeatTimer = null;
     this.keys = null;
     this.localFreePosition = false;
     this.localWasdMoving = false;
@@ -354,10 +375,9 @@ export class LibraryScene extends Phaser.Scene {
     }
   }
 
-  /** Capacity-scaled room rect, centered in the canvas. */
+  /** Capacity-scaled room rect in fixed world coordinates. */
   private layoutRoom() {
-    const { width, height } = this.scale;
-    const size = getRoomSize(this.capacity, width, height);
+    const size = getRoomSize(this.capacity);
     this.roomW = size.w;
     this.roomH = size.h;
     const center = studyCenter(this.capacity, this.roomW, this.roomH);
@@ -455,17 +475,9 @@ export class LibraryScene extends Phaser.Scene {
   }
 
   /**
-   * Frame the room with a zoom derived from the LARGEST possible room, not the
-   * current one. This is the key to capacity-based sizing actually showing on
-   * screen: a fixed zoom means a small (1-person) room genuinely renders small
-   * and cozy while an 8-person room fills the frame. The biggest room just fits
-   * the available band (margins reserved for the top HUD and bottom timer/chat
-   * bar), so every room — and the whole walkable floor — stays fully visible.
-   *
-   * NOTE: Phaser scales the camera around its CENTRE, not its top-left, so we
-   * centre horizontally with centerOn (which is zoom-aware) and then nudge the
-   * view vertically into the band between the HUD bars. A hand-rolled setScroll
-   * that assumes a top-left pivot pushes the room off to one side at zoom != 1.
+   * Fit the fixed-size room world into the viewport. Only the camera zoom and
+   * scroll change on resize or browser zoom — furniture proportions and layout
+   * stay identical because world coordinates never depend on canvas size.
    */
   private applyRoomFraming() {
     const cam = this.cameras.main;
@@ -475,14 +487,26 @@ export class LibraryScene extends Phaser.Scene {
     const bottomReserve = viewH * 0.22;
     const availH = viewH - topReserve - bottomReserve;
     const availW = viewW * 0.94;
-    const maxScale = maxRoomScale();
-    const zoom = Math.min(availW / (viewW * maxScale), availH / (viewH * maxScale));
+
+    const fitZoom = Math.min(availW / this.roomW, availH / this.roomH);
+    const zoom = fitZoom * roomZoomForCapacity(this.capacity);
     cam.setZoom(zoom);
-    cam.centerOn(this.roomW / 2, this.roomH / 2);
+
+    // Frame the study cluster as the hero focal point, not the room centroid.
+    const frameX = this.centerX;
+    const frameY = this.centerY - this.roomH * 0.02;
+    cam.centerOn(frameX, frameY);
+
     // Shift the framed room up so it sits centred within the reserved band
     // rather than the full viewport (bottom bar is taller than the top HUD).
     const centerScreenY = topReserve + availH / 2;
     cam.scrollY += (viewH / 2 - centerScreenY) / zoom;
+  }
+
+  /** Refit camera after viewport or browser-zoom change — no room rebuild. */
+  reframeRoom() {
+    if (this.roomW <= 0 || this.roomH <= 0) return;
+    this.applyRoomFraming();
   }
 
   setTimerPhase(phase: TimerPhase) {
@@ -535,12 +559,7 @@ export class LibraryScene extends Phaser.Scene {
   }
 
   handleResize() {
-    this.destroyRoomObjects();
-    this.buildRoom();
-    this.syncMembers(this.membersCache);
-    if (this.localFreePosition) {
-      this.startLocalWandering();
-    }
+    this.reframeRoom();
   }
 
   private buildNavGrid(w: number, h: number) {
@@ -587,6 +606,23 @@ export class LibraryScene extends Phaser.Scene {
   private stopLocalWandering() {
     this.wanderTimer?.remove();
     this.wanderTimer = null;
+  }
+
+  /** Mark a locally chosen seat as authoritative for a short window so an
+   * in-flight/stale room sync can't yank the local avatar back off it. */
+  private setPendingSeat(slot: number) {
+    this.pendingSeatSlot = slot;
+    this.pendingSeatTimer?.remove();
+    this.pendingSeatTimer = this.time.delayedCall(PENDING_SEAT_TTL_MS, () => {
+      this.pendingSeatSlot = null;
+      this.pendingSeatTimer = null;
+    });
+  }
+
+  private clearPendingSeat() {
+    this.pendingSeatSlot = null;
+    this.pendingSeatTimer?.remove();
+    this.pendingSeatTimer = null;
   }
 
   private scheduleNextWander(delayMs: number) {
@@ -721,6 +757,53 @@ export class LibraryScene extends Phaser.Scene {
   }
 
   /**
+   * Smoothly slide an avatar from its current spot onto a (new) seat, then sit.
+   * Used for remote players changing seats so they glide rather than teleport-
+   * snapping. Falls back to an instant seat for tiny/zero distances.
+   */
+  private glideAvatarToSeat(view: AvatarView, slot: number) {
+    const pos = this.seatPositions[slot];
+    if (!pos) return;
+    view.deskSlot = slot;
+    view.walkTween?.stop();
+    view.walkTween = null;
+    view.isSeated = false;
+    view.frog.setRotation(0);
+    view.seatFaceDY = 0;
+
+    const sx = view.container.x;
+    const sy = view.container.y;
+    const d = Math.hypot(pos.x - sx, pos.y - sy);
+    if (d < 2) {
+      this.seatAvatar(view);
+      return;
+    }
+
+    const duration = Phaser.Math.Clamp((d / NAV_WALK_SPEED) * 1000, 180, 700);
+    this.playFrogAnim(view, "walk");
+    const follower = { t: 0 };
+    let prevX = sx;
+    view.walkTween = this.tweens.add({
+      targets: follower,
+      t: 1,
+      duration,
+      ease: "Sine.easeInOut",
+      onUpdate: () => {
+        const x = sx + (pos.x - sx) * follower.t;
+        const y = sy + (pos.y - sy) * follower.t;
+        view.container.setPosition(x, y);
+        this.updateFacing(view, x - prevX);
+        prevX = x;
+        this.updateAvatarDepth(view);
+      },
+      onComplete: () => {
+        view.walkTween = null;
+        this.seatAvatar(view);
+      },
+    });
+  }
+
+  /**
    * Orient a seated frog toward the table from the seat's position: flipX for
    * left/right, a capped body lean for the diagonal, and a small vertical sit
    * offset so seats below the table read as facing up/away and seats above read
@@ -828,22 +911,29 @@ export class LibraryScene extends Phaser.Scene {
     if (!local || local.walkTween) return;
 
     // Same real-world pace as the walk tweens: WALK_SPEED px/sec converted to
-    // px/frame via delta time, so WASD matches regardless of frame rate.
-    const speed = WALK_SPEED * (delta / 1000);
-    let dx = 0;
-    let dy = 0;
-    if (this.keys.W.isDown) dy -= speed;
-    if (this.keys.S.isDown) dy += speed;
-    if (this.keys.A.isDown) dx -= speed;
-    if (this.keys.D.isDown) dx += speed;
+    // px/frame via delta time, so WASD matches regardless of frame rate. The
+    // delta is clamped so a stalled/backgrounded tab can't produce one giant
+    // step that flings the avatar across the room.
+    const speed = WALK_SPEED * (Math.min(delta, MAX_MOVE_DELTA_MS) / 1000);
+    let ix = 0;
+    let iy = 0;
+    if (this.keys.W.isDown) iy -= 1;
+    if (this.keys.S.isDown) iy += 1;
+    if (this.keys.A.isDown) ix -= 1;
+    if (this.keys.D.isDown) ix += 1;
 
-    if (dx === 0 && dy === 0) {
+    if (ix === 0 && iy === 0) {
       if (this.localWasdMoving) {
         this.localWasdMoving = false;
         this.refreshFrogMotion(local);
       }
       return;
     }
+
+    // Normalize so diagonal movement isn't ~1.41x faster than cardinal.
+    const inv = 1 / Math.hypot(ix, iy);
+    const dx = ix * inv * speed;
+    const dy = iy * inv * speed;
 
     if (!this.localWasdMoving) {
       this.localWasdMoving = true;
@@ -886,6 +976,10 @@ export class LibraryScene extends Phaser.Scene {
       this.avatars.set(this.myUserId, local);
     }
 
+    // Optimistically own this seat until the server confirms the change, so a
+    // realtime room sync that races in before changeSeat() commits cannot snap
+    // us back to the previous seat.
+    this.setPendingSeat(slot);
     this.teleportLocalUserToSeat(slot);
     this.applyStatus(
       local,
@@ -896,7 +990,7 @@ export class LibraryScene extends Phaser.Scene {
   private drawLibrary(w: number, h: number) {
     const plan = getFurniturePlan(this.capacity);
 
-    drawRoomBackdrop(this, w, h, this.scale.width, this.scale.height);
+    drawRoomBackdrop(this, w, h, BACKDROP_VIEW_PAD, BACKDROP_VIEW_PAD);
     this.drawHerringboneFloor(w, h);
     this.drawWalls(w, h);
     drawRoomFrame(this, w, h);
@@ -1208,7 +1302,7 @@ export class LibraryScene extends Phaser.Scene {
    */
   private drawRunnerRugs(w: number, h: number) {
     const rug = this.add.graphics().setDepth(1);
-    drawCozyRug(rug, w * 0.5, h * 0.34, w * 0.14, h * 0.24, C.rugCream, C.rugCreamBorder, false);
+    drawCozyRug(rug, w * 0.48, h * 0.36, w * 0.12, h * 0.2, C.rugCream, C.rugCreamBorder, false);
   }
 
   /**
@@ -1956,7 +2050,19 @@ export class LibraryScene extends Phaser.Scene {
       seen.add(m.userId);
       const isLocal = m.userId === this.myUserId;
 
-      if (m.deskSlot < 0) {
+      // Local optimistic-seat authority: while a freshly chosen seat is awaiting
+      // server confirmation, ignore conflicting/stale server seat data so the
+      // local avatar never snaps back. Once the server echoes our seat, release.
+      let slot = m.deskSlot;
+      if (isLocal && this.pendingSeatSlot != null) {
+        if (m.deskSlot === this.pendingSeatSlot) {
+          this.clearPendingSeat();
+        } else {
+          slot = this.pendingSeatSlot;
+        }
+      }
+
+      if (slot < 0) {
         if (isLocal) {
           const existing = this.avatars.get(m.userId);
           if (!existing) {
@@ -1973,7 +2079,7 @@ export class LibraryScene extends Phaser.Scene {
         return;
       }
 
-      const pos = this.seatPositions[m.deskSlot];
+      const pos = this.seatPositions[slot];
       if (!pos) return;
 
       const existing = this.avatars.get(m.userId);
@@ -1984,7 +2090,7 @@ export class LibraryScene extends Phaser.Scene {
         const spawn = isLocal
           ? this.navGrid?.findRandomWalkable(pos.x, pos.y, 30) ?? pos
           : pos;
-        const avatar = this.buildAvatar(m, spawn.x, spawn.y);
+        const avatar = this.buildAvatar({ ...m, deskSlot: slot }, spawn.x, spawn.y);
         if (shouldLockToSeat) {
           this.seatAvatar(avatar);
           this.applyStatus(
@@ -1994,24 +2100,24 @@ export class LibraryScene extends Phaser.Scene {
         }
         this.avatars.set(m.userId, avatar);
       } else {
-        if (existing.deskSlot !== m.deskSlot) {
-          existing.deskSlot = m.deskSlot;
+        if (existing.deskSlot !== slot) {
           if (isLocal) {
+            existing.deskSlot = slot;
             this.localFreePosition = false;
             this.stopLocalWandering();
-            this.teleportLocalUserToSeat(m.deskSlot);
+            this.teleportLocalUserToSeat(slot);
             this.applyStatus(
               existing,
               shouldLockToSeat ? "studying" : m.status
             );
           } else if (shouldLockToSeat) {
-            this.seatAvatar(existing);
+            // Remote player switched seats — glide over instead of snapping.
+            this.glideAvatarToSeat(existing, slot);
+          } else {
+            existing.deskSlot = slot;
           }
-        } else if (shouldLockToSeat && !existing.isSeated) {
+        } else if (shouldLockToSeat && !existing.isSeated && !existing.walkTween) {
           this.seatAvatar(existing);
-        } else if (isLocal && shouldLockToSeat && !existing.isSeated) {
-          this.teleportLocalUserToSeat(m.deskSlot);
-          this.applyStatus(existing, "studying");
         }
 
         if (existing.status !== m.status) {
@@ -2276,6 +2382,7 @@ export class LibraryScene extends Phaser.Scene {
   resizeSeats(capacity: number) {
     this.capacity = normalizeCapacity(capacity);
     this.stopLocalWandering();
+    this.clearPendingSeat();
     for (const view of this.avatars.values()) {
       this.clearAvatarBubble(view);
       view.animTween?.stop();
