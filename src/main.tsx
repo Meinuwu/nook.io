@@ -1,6 +1,7 @@
 import React, { Component, type ErrorInfo, type ReactNode } from "react";
 import ReactDOM from "react-dom/client";
 import { BrowserRouter } from "react-router-dom";
+import { inject } from "@vercel/analytics";
 import App from "./App";
 import { initPreferencesOnBoot } from "./lib/preferences";
 import { initBackend } from "./lib/backend";
@@ -10,6 +11,9 @@ initPreferencesOnBoot();
 void initBackend().catch((err) => {
   console.error("[nook] Backend init failed:", err);
 });
+
+// Initialize Vercel Analytics
+inject();
 
 window.addEventListener("unhandledrejection", (event) => {
   console.warn("[nook] Unhandled promise rejection:", event.reason);
