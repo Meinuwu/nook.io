@@ -315,13 +315,11 @@ export function roomZoomForCapacity(capacity: number): number {
 
 export interface FurniturePlan {
   loungeRug: boolean;
+  /** Campfire is now decorative only — no seats ring it (campfireChairs is 0). */
   campfire: boolean;
   campfireChairs: number;
-  /** Fire pit visual + chair orbit scale by capacity tier. */
+  /** Fire pit visual scale by capacity tier. */
   campfireScale: number;
-  pond: boolean;
-  /** Pond size multiplier — grows with capacity. */
-  pondScale: number;
   sofaH: boolean;
   sofaV: boolean;
   coffeeTable: boolean;
@@ -329,7 +327,7 @@ export interface FurniturePlan {
   sideTableRight: boolean;
   floorLamp: boolean;
   fireplace: boolean;
-  /** @deprecated replaced by pond — always 0 */
+  /** @deprecated lower-floor decor removed — always 0 */
   readingNooks: number;
 }
 
@@ -345,71 +343,24 @@ export interface CampfireLayout {
   chairs: CampChairSpot[];
 }
 
-export interface PondLayout {
-  cx: number;
-  cy: number;
-  rx: number;
-  ry: number;
-}
-
 /**
  * Which lounge/decor pieces to place for a capacity. Every room gets a campfire
- * gathering spot (hearth + camp chairs on a rug) and a garden pond on the lower
- * floor; wall bookshelves, plants and windows scale with room fractions.
+ * as a decorative hearth (no seats ring it); wall bookshelves, plants and
+ * windows scale with room fractions.
  */
 export function getFurniturePlan(capacity: number): FurniturePlan {
   const cap = normalizeCapacity(capacity);
-  const campfireChairs =
-    cap <= 2 ? 2 : cap <= 4 ? 4 : cap <= 6 ? 5 : 6;
+  // Campfire is decorative only now — no stools ring it, so usable seats are
+  // exactly the study chairs (0 campfire chairs keeps totalSeatCount === cap).
+  const campfireChairs = 0;
   const campfireScale =
-    cap <= 2 ? 0.78 : cap <= 4 ? 1.0 : cap <= 6 ? 1.15 : 1.28;
-  const pondScale = 0.82 + (cap - 1) * 0.055;
-
-  if (cap <= 2) {
-    return {
-      loungeRug: true,
-      campfire: true,
-      campfireChairs,
-      campfireScale,
-      pond: true,
-      pondScale,
-      sofaH: false,
-      sofaV: false,
-      coffeeTable: false,
-      sideTableLeft: false,
-      sideTableRight: false,
-      floorLamp: true,
-      fireplace: false,
-      readingNooks: 0,
-    };
-  }
-
-  if (cap <= 4) {
-    return {
-      loungeRug: true,
-      campfire: true,
-      campfireChairs,
-      campfireScale,
-      pond: true,
-      pondScale,
-      sofaH: false,
-      sofaV: false,
-      coffeeTable: false,
-      sideTableLeft: false,
-      sideTableRight: false,
-      floorLamp: true,
-      fireplace: false,
-      readingNooks: 0,
-    };
-  }
+    cap <= 2 ? 0.55 : cap <= 4 ? 0.7 : cap <= 6 ? 0.8 : 0.88;
 
   return {
     loungeRug: true,
     campfire: true,
     campfireChairs,
     campfireScale,
-    pond: true,
-    pondScale,
     sofaH: false,
     sofaV: false,
     coffeeTable: false,
@@ -462,31 +413,30 @@ export const L = {
   // the study cluster) to light the study area — no longer in the lounge.
   floorLampX: 0.31,
   floorLampY: 0.5,
-  pondCx: 0.5,
-  pondCy: 0.79,
+  // Bookshelves sized to read in proportion with the central seating cluster.
   shelfTopY: 0.02,
-  shelfTopH: 0.17,
-  shelfRightX: 0.9,
-  shelfRightW: 0.08,
+  shelfTopH: 0.14,
+  shelfRightX: 0.91,
+  shelfRightW: 0.065,
 } as const;
 
 // Bookshelves pack the top wall on both sides of the three windows (centres at
 // 0.33 / 0.5 / 0.67), giving a dense, library-like back wall.
 export const TOP_SHELVES = [
-  { x: 0.02, w: 0.07 },
-  { x: 0.1, w: 0.07 },
-  { x: 0.18, w: 0.07 },
-  { x: 0.75, w: 0.07 },
-  { x: 0.83, w: 0.07 },
-  { x: 0.91, w: 0.07 },
+  { x: 0.03, w: 0.062 },
+  { x: 0.1, w: 0.062 },
+  { x: 0.17, w: 0.062 },
+  { x: 0.76, w: 0.062 },
+  { x: 0.83, w: 0.062 },
+  { x: 0.9, w: 0.062 },
 ] as const;
 
 // Four stacked rows line the full right wall like library stacks.
 export const RIGHT_SHELVES = [
-  { y: 0.26, h: 0.15 },
-  { y: 0.43, h: 0.15 },
-  { y: 0.6, h: 0.15 },
-  { y: 0.77, h: 0.12 },
+  { y: 0.27, h: 0.135 },
+  { y: 0.43, h: 0.135 },
+  { y: 0.59, h: 0.135 },
+  { y: 0.75, h: 0.11 },
 ] as const;
 
 // Plants along the right wall only — no floor decor in the campfire lounge.
@@ -520,12 +470,6 @@ export function isCampfireSeatSlot(slot: number, capacity: number): boolean {
   return slot >= cap && slot < totalSeatCount(capacity);
 }
 
-/** Decorative fish count scales with pond size. */
-export function pondFishCount(capacity: number): number {
-  const cap = normalizeCapacity(capacity);
-  return cap <= 2 ? 2 : cap <= 4 ? 3 : cap <= 6 ? 3 : 4;
-}
-
 /** Camp chairs arranged in a semi-circle around the campfire, facing inward. */
 export function getCampfireLayout(
   w: number,
@@ -549,18 +493,6 @@ export function getCampfireLayout(
     chairs.push({ x, y, face });
   }
   return { fireX, fireY, chairs };
-}
-
-/** Garden pond on the lower floor — scales with capacity. */
-export function getPondLayout(w: number, h: number, capacity: number): PondLayout {
-  const cap = normalizeCapacity(capacity);
-  const scale = 0.82 + (cap - 1) * 0.055;
-  return {
-    cx: w * L.pondCx,
-    cy: h * L.pondCy,
-    rx: w * 0.13 * scale,
-    ry: h * 0.052 * scale,
-  };
 }
 
 /** Study table center + rug sized to wrap table and all seats for this capacity. */
@@ -655,7 +587,6 @@ export function buildFurnitureObstacles(
       plan.campfireChairs,
       plan.campfireScale
     );
-    const F = FURNITURE_SCALE;
     obstacles.push({
       type: "ellipse",
       cx: layout.fireX,
@@ -674,17 +605,6 @@ export function buildFurnitureObstacles(
         pad: 6,
       });
     }
-  }
-  if (plan.pond) {
-    const scale = plan.pondScale ?? 1;
-    obstacles.push({
-      type: "ellipse",
-      cx: w * L.pondCx,
-      cy: h * L.pondCy,
-      rx: w * 0.13 * scale,
-      ry: h * 0.052 * scale,
-      pad: 8,
-    });
   }
   if (plan.fireplace) {
     // Grand fireplace (back-left, mantel clear).
@@ -710,7 +630,7 @@ export function buildFurnitureObstacles(
     obstacles.push({ type: "ellipse", cx: w * L.floorLampX, cy: h * L.floorLampY, rx: 16 * F, ry: 18 * F, pad: 4 });
   }
 
-  // Reading nooks removed — pond replaces the lower-floor clusters.
+  // Lower-floor decor removed — readingNooks is always 0 (loop is inert).
   for (let i = 0; i < plan.readingNooks; i++) {
     const nook = READING_NOOKS[i];
     if (!nook) continue;

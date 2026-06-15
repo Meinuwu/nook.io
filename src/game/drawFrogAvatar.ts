@@ -19,6 +19,33 @@ export function createFrogAvatar(
   return img;
 }
 
+/**
+ * Fraction of the frog texture (from the top) that counts as the "head" — the
+ * big domed face. The seam sits in plain body-green below the cheeks/mouth so a
+ * head-only reading bob shows no edge: anything below stays put on the body.
+ */
+export const FROG_HEAD_CROP_FRACTION = 0.6;
+
+/**
+ * A head-only overlay built from the same frog texture, cropped to the upper
+ * dome and placed exactly over `createFrogAvatar`'s body image. Because it
+ * shares the body's transform (position, scale, origin) and the full body image
+ * sits behind it, gently tweening just this overlay's Y makes only the head bob
+ * while reading — the lifted gap is backfilled by the identical body pixels, so
+ * there is no seam and the torso/paws/book stay perfectly still.
+ */
+export function createFrogHead(
+  scene: Phaser.Scene,
+  x: number,
+  y: number,
+  displayScale = 0.9
+): Phaser.GameObjects.Image {
+  const head = createFrogAvatar(scene, x, y, displayScale);
+  const cropH = Math.round(head.height * FROG_HEAD_CROP_FRACTION);
+  head.setCrop(0, 0, head.width, cropH);
+  return head;
+}
+
 /** Vertical offset of the reading book within the avatar container (held at the frog's lower-front). */
 export const READING_BOOK_Y = -2;
 

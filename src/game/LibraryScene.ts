@@ -21,6 +21,7 @@ import {
 } from "./drawCozyRoom";
 import {
   createFrogAvatar,
+  createFrogHead,
   drawReadingBook,
   drawSpeechBubble,
   drawTypingBubble,
@@ -36,7 +37,6 @@ import {
   getFurniturePlan,
   getRoomSize,
   isCampfireSeatSlot,
-  pondFishCount,
   getStudyPlacement,
   getTableLayout,
   L,
@@ -181,6 +181,10 @@ function formatStudyStopwatch(totalSeconds: number): string {
 interface AvatarView {
   container: Phaser.GameObjects.Container;
   frog: Phaser.GameObjects.Image;
+  /** Head-only overlay (cropped frog dome) layered over `frog`; only this bobs
+   * while reading so the torso/paws/book stay still. Mirrors the body's
+   * facing/lean/scale so the two always read as one character. */
+  head: Phaser.GameObjects.Image;
   book: Phaser.GameObjects.Graphics;
   status: string;
   deskSlot: number;
@@ -207,34 +211,6 @@ interface BubbleView {
   container: Phaser.GameObjects.Container;
   expiresAt: number;
   userId: string;
-}
-
-interface PondFish {
-  gfx: Phaser.GameObjects.Graphics;
-  originX: number;
-  originY: number;
-  pathRx: number;
-  pathRy: number;
-  angle: number;
-  speed: number;
-  hue: number;
-  lastFlip: boolean;
-}
-
-interface PondSeaweed {
-  gfx: Phaser.GameObjects.Graphics;
-  bx: number;
-  by: number;
-  height: number;
-  lean: number;
-  phase: number;
-  swaySpeed: number;
-}
-
-function inPondEllipse(px: number, py: number, rx: number, ry: number, inset = 0.9): boolean {
-  const nx = px / (rx * inset);
-  const ny = py / (ry * inset);
-  return nx * nx + ny * ny <= 1;
 }
 
 type TableMetrics = TableLayout;
@@ -293,11 +269,8 @@ export class LibraryScene extends Phaser.Scene {
   private studyTimerAccum = 0;
   private ambianceRedrawAccum = 0;
   private lastAmbianceKey = "";
-  private pondAnimAccum = 0;
 
   private campfireCenter = { x: 0, y: 0 };
-  private pondFish: PondFish[] = [];
-  private pondSeaweed: PondSeaweed[] = [];
 
   constructor() {
     super("LibraryScene");
@@ -413,10 +386,6 @@ export class LibraryScene extends Phaser.Scene {
     this.seatZones = [];
     this.seatGraphics = [];
     this.seatPositions = [];
-    this.pondFish.forEach((f) => f.gfx.destroy());
-    this.pondFish = [];
-    this.pondSeaweed.forEach((s) => s.gfx.destroy());
-    this.pondSeaweed = [];
     this.floorZone?.destroy();
     this.floorZone = null;
     // These ambiance layers are depth < 10 and were destroyed above; drop the
@@ -470,6 +439,7 @@ export class LibraryScene extends Phaser.Scene {
     local.deskSlot = slot;
     local.isSeated = false;
     local.frog.setRotation(0);
+    local.head.setRotation(0);
     local.seatFaceDY = 0;
     this.seatAvatar(local);
   }
@@ -662,6 +632,7 @@ export class LibraryScene extends Phaser.Scene {
     if (view.isLocal) this.localWasdMoving = false;
     // Leaving the seat: drop the seated lean/offset so the frog walks upright.
     view.frog.setRotation(0);
+    view.head.setRotation(0);
     view.seatFaceDY = 0;
 
     const sx = view.container.x;
@@ -733,6 +704,14 @@ export class LibraryScene extends Phaser.Scene {
   private updateFacing(view: AvatarView, dx: number) {
     if (dx > 0.3) view.frog.setFlipX(false);
     else if (dx < -0.3) view.frog.setFlipX(true);
+    this.syncHeadPose(view);
+  }
+
+  /** Lock the head overlay onto the body's current facing + seated lean so the
+   * two always read as one frog (the head only ever bobs in Y on top of this). */
+  private syncHeadPose(view: AvatarView) {
+    view.head.setFlipX(view.frog.flipX);
+    view.head.setRotation(view.frog.rotation);
   }
 
   /** Lower (nearer) avatars draw in front; keeps everyone above the furniture. */
@@ -769,6 +748,7 @@ export class LibraryScene extends Phaser.Scene {
     view.walkTween = null;
     view.isSeated = false;
     view.frog.setRotation(0);
+    view.head.setRotation(0);
     view.seatFaceDY = 0;
 
     const sx = view.container.x;
@@ -819,6 +799,7 @@ export class LibraryScene extends Phaser.Scene {
       if (Math.abs(dx) > 2) view.frog.setFlipX(dx < 0);
       view.frog.setRotation(Phaser.Math.Clamp(dx / 260, -0.16, 0.16));
       view.seatFaceDY = Phaser.Math.Clamp(dy / 14, -6, 6);
+      this.syncHeadPose(view);
       return;
     }
 
@@ -831,6 +812,7 @@ export class LibraryScene extends Phaser.Scene {
     // Seat below the table (dy<0, table above) faces up/away → sit a touch
     // higher; seat above the table (dy>0) faces down → sit slightly lower.
     view.seatFaceDY = Phaser.Math.Clamp(dy / 14, -6, 6);
+    this.syncHeadPose(view);
   }
 
   private setupKeyboard() {
@@ -894,7 +876,6 @@ export class LibraryScene extends Phaser.Scene {
 
   update(_time: number, delta: number) {
     this.advanceAmbiance(delta);
-    this.updatePondLife(delta);
 
     if (this.membersCache.some((m) => m.status === "studying")) {
       this.studyTimerAccum += delta;
@@ -996,7 +977,6 @@ export class LibraryScene extends Phaser.Scene {
     drawRoomFrame(this, w, h);
     this.drawRunnerRugs(w, h);
     if (plan.loungeRug) this.drawLoungeRug(w, h);
-    if (plan.pond) this.drawPond(w, h, plan.pondScale);
     this.drawArchedWindows(w, h);
     this.drawWallDecor(w, h);
     this.drawBookshelves(w, h);
@@ -1070,231 +1050,6 @@ export class LibraryScene extends Phaser.Scene {
       base: 0.1,
       night: 0.58,
     });
-  }
-
-  /** Calm garden pond with opaque water, chunky shore pebbles, lilies and seaweed. */
-  private drawPond(w: number, h: number, pondScale: number) {
-    const cx = w * L.pondCx;
-    const cy = h * L.pondCy;
-    const rx = w * 0.13 * pondScale;
-    const ry = h * 0.052 * pondScale;
-    const g = this.add.graphics().setDepth(1);
-    g.setPosition(cx, cy);
-
-    g.fillStyle(0x4a8880, 1);
-    g.fillEllipse(0, 0, rx * 2 + 6, ry * 2 + 6);
-    g.fillStyle(0x5a9890, 1);
-    g.fillEllipse(0, 0, rx * 2, ry * 2);
-    g.fillStyle(0x6aaca8, 1);
-    g.fillEllipse(0, 0, rx * 2 - 8, ry * 2 - 8);
-    g.fillStyle(0x7ab8b0, 1);
-    g.fillEllipse(0, 0, rx * 2 - 16, ry * 2 - 16);
-    drawOutlinedEllipse(g, 0, 0, rx, ry, 0x6aaca8, C.outlineSoft, 2);
-    g.fillStyle(0x98d0c8, 0.45);
-    g.fillEllipse(-rx * 0.15, -ry * 0.1, rx * 0.9, ry * 0.55);
-
-    const pebbleScale = 0.92 + pondScale * 0.18;
-
-    const innerCount = Math.floor(40 + pondScale * 24);
-    for (let i = 0; i < innerCount; i++) {
-      const a = (Math.PI * 2 * i) / innerCount + pseudo(i * 3.7) * 0.18;
-      const ring = 1.0 + pseudo(i * 1.9) * 0.06;
-      const px = Math.cos(a) * rx * ring;
-      const py = Math.sin(a) * ry * ring;
-      const pw = (20 + pseudo(i * 2.3) * 18) * pebbleScale;
-      const ph = (16 + pseudo(i * 4.1) * 14) * pebbleScale;
-      const tone = pseudo(i * 5.5) > 0.45 ? C.creamDark : C.woodLight;
-      drawOutlinedEllipse(g, px, py, pw, ph, tone, C.outlineSoft, 2.5);
-    }
-
-    const midCount = Math.floor(28 + pondScale * 18);
-    for (let i = 0; i < midCount; i++) {
-      const a = (Math.PI * 2 * i) / midCount + pseudo(i * 4.9) * 0.22;
-      const ring = 1.1 + pseudo(i * 2.1) * 0.08;
-      const px = Math.cos(a) * rx * ring;
-      const py = Math.sin(a) * ry * ring;
-      const pw = (18 + pseudo(i * 3.3) * 16) * pebbleScale;
-      const ph = (14 + pseudo(i * 5.7) * 12) * pebbleScale;
-      const tone = pseudo(i * 6.1) > 0.5 ? 0xd8c8b0 : C.creamDark;
-      drawOutlinedEllipse(g, px, py, pw, ph, tone, C.outlineSoft, 2);
-    }
-
-    const outerCount = Math.floor(20 + pondScale * 14);
-    for (let i = 0; i < outerCount; i++) {
-      const a = (Math.PI * 2 * i) / outerCount + pseudo(i * 5.1) * 0.28;
-      const ring = 1.22 + pseudo(i * 2.7) * 0.1;
-      const px = Math.cos(a) * rx * ring;
-      const py = Math.sin(a) * ry * ring;
-      const pw = (16 + pseudo(i * 3.9) * 14) * pebbleScale;
-      const ph = (12 + pseudo(i * 6.3) * 11) * pebbleScale;
-      drawOutlinedEllipse(g, px, py, pw, ph, C.creamDark, C.outlineSoft, 2);
-    }
-
-    const farCount = Math.floor(12 + pondScale * 10);
-    for (let i = 0; i < farCount; i++) {
-      const a = (Math.PI * 2 * i) / farCount + pseudo(i * 7.3) * 0.35;
-      const ring = 1.34 + pseudo(i * 3.5) * 0.08;
-      const px = Math.cos(a) * rx * ring;
-      const py = Math.sin(a) * ry * ring;
-      const pw = (14 + pseudo(i * 4.7) * 10) * pebbleScale;
-      const ph = (10 + pseudo(i * 8.1) * 8) * pebbleScale;
-      drawOutlinedEllipse(g, px, py, pw, ph, C.woodLight, C.outlineSoft, 1.5);
-    }
-
-    for (let i = 0; i < 4; i++) {
-      const rippleR = rx * (0.35 + i * 0.12);
-      g.lineStyle(1, 0xb8e0d8, 0.25 - i * 0.04);
-      g.strokeEllipse(0, ry * 0.05, rippleR, rippleR * (ry / rx) * 0.55);
-    }
-
-    const lilyCount = this.capacity <= 2 ? 3 : this.capacity <= 4 ? 4 : 5;
-    for (let i = 0; i < lilyCount; i++) {
-      const a = pseudo(i * 11.3) * Math.PI * 2;
-      const dist = 0.28 + pseudo(i * 7.7) * 0.42;
-      const lx = Math.cos(a) * rx * dist;
-      const ly = Math.sin(a) * ry * dist;
-      if (!inPondEllipse(lx, ly, rx, ry, 0.82)) continue;
-      const lw = 14 + pseudo(i * 3.1) * 8;
-      const lh = 10 + pseudo(i * 5.9) * 6;
-      drawOutlinedEllipse(g, lx, ly, lw, lh, C.plantMint, C.plantDark, 1.5);
-      drawOutlinedEllipse(g, lx + 2, ly - 1, lw * 0.35, lh * 0.35, C.sageLight, C.plantDark, 1);
-    }
-
-    const benchX = cx - rx * 1.15;
-    const benchY = cy + ry * 0.35;
-    const bg = this.add.graphics().setDepth(2);
-    bg.setPosition(benchX, benchY).setScale(FURNITURE_SCALE);
-    drawOutlinedRect(bg, 0, 0, 52, 14, C.wood, C.outline, 6, 2.5);
-    drawOutlinedRect(bg, 4, 12, 6, 12, C.woodDark, C.outline, 2, 1.5);
-    drawOutlinedRect(bg, 42, 12, 6, 12, C.woodDark, C.outline, 2, 1.5);
-
-    this.spawnPondSeaweed(cx, cy, rx, ry);
-    this.spawnPondFish(cx, cy, rx, ry, pondFishCount(this.capacity));
-  }
-
-  private spawnPondSeaweed(cx: number, cy: number, rx: number, ry: number) {
-    const count = this.capacity <= 2 ? 4 : this.capacity <= 4 ? 6 : 8;
-    for (let i = 0; i < count; i++) {
-      const a = (Math.PI * 2 * i) / count + pseudo(i * 4.3) * 0.5;
-      const dist = 0.62 + pseudo(i * 2.9) * 0.18;
-      const bx = Math.cos(a) * rx * dist;
-      const by = Math.sin(a) * ry * dist;
-      if (!inPondEllipse(bx, by, rx, ry, 0.88)) continue;
-      const height = ry * (0.45 + pseudo(i * 6.1) * 0.35);
-      const topY = by - height;
-      if (!inPondEllipse(bx, topY, rx, ry, 0.78)) continue;
-      const gfx = this.add.graphics().setDepth(2);
-      gfx.setPosition(cx, cy);
-      this.pondSeaweed.push({
-        gfx,
-        bx,
-        by,
-        height,
-        lean: (pseudo(i * 8.7) - 0.5) * 0.4,
-        phase: pseudo(i * 3.5) * Math.PI * 2,
-        swaySpeed: 0.8 + pseudo(i * 1.7) * 0.6,
-      });
-    }
-  }
-
-  private drawSeaweedStrand(
-    g: Phaser.GameObjects.Graphics,
-    bx: number,
-    by: number,
-    height: number,
-    lean: number,
-    sway: number
-  ) {
-    g.clear();
-    const segments = 5;
-    let px = bx;
-    let py = by;
-    g.lineStyle(3, C.plantDark, 0.75);
-    g.beginPath();
-    g.moveTo(r(px), r(py));
-    for (let s = 1; s <= segments; s++) {
-      const t = s / segments;
-      const wave = Math.sin(sway + t * 2.4) * 4 * t;
-      px = bx + lean * height * t + wave;
-      py = by - height * t;
-      g.lineTo(r(px), r(py));
-    }
-    g.strokePath();
-    g.lineStyle(2, C.plant, 0.55);
-    g.beginPath();
-    px = bx;
-    py = by;
-    g.moveTo(r(px), r(py));
-    for (let s = 1; s <= segments; s++) {
-      const t = s / segments;
-      const wave = Math.sin(sway + t * 2.4 + 0.6) * 3 * t;
-      px = bx + lean * height * t * 0.7 + wave;
-      py = by - height * t;
-      g.lineTo(r(px), r(py));
-    }
-    g.strokePath();
-  }
-
-  private updatePondLife(delta: number) {
-    this.pondAnimAccum += delta;
-    if (this.pondAnimAccum < 33) return;
-    const step = this.pondAnimAccum;
-    this.pondAnimAccum = 0;
-    this.updatePondFish(step);
-    this.updatePondSeaweed(step);
-  }
-
-  private updatePondSeaweed(delta: number) {
-    for (const weed of this.pondSeaweed) {
-      weed.phase += weed.swaySpeed * (delta / 1000);
-      this.drawSeaweedStrand(weed.gfx, weed.bx, weed.by, weed.height, weed.lean, weed.phase);
-    }
-  }
-
-  private spawnPondFish(cx: number, cy: number, rx: number, ry: number, count: number) {
-    const hues = [0xf0a060, 0xffb878, 0xe89070, 0xffc8a0];
-    for (let i = 0; i < count; i++) {
-      const gfx = this.add.graphics().setDepth(2);
-      const pathRx = rx * (0.28 + pseudo(i * 2.1) * 0.22);
-      const pathRy = ry * (0.35 + pseudo(i * 3.3) * 0.25);
-      this.pondFish.push({
-        gfx,
-        originX: cx,
-        originY: cy,
-        pathRx,
-        pathRy,
-        angle: pseudo(i * 7.1) * Math.PI * 2,
-        speed: 0.35 + pseudo(i * 4.7) * 0.45,
-        hue: hues[i % hues.length],
-        lastFlip: false,
-      });
-    }
-  }
-
-  private drawFishShape(g: Phaser.GameObjects.Graphics, hue: number, flip: boolean) {
-    g.clear();
-    const dir = flip ? -1 : 1;
-    g.fillStyle(hue, 1);
-    g.fillEllipse(0, 0, 14, 7);
-    g.fillTriangle(dir * 8, 0, dir * 14, -4, dir * 14, 4);
-    g.lineStyle(1.5, C.outlineSoft, 0.8);
-    g.strokeEllipse(0, 0, 14, 7);
-    g.fillStyle(0xffffff, 0.9);
-    g.fillCircle(dir * 4, -1.5, 1.5);
-  }
-
-  private updatePondFish(delta: number) {
-    for (const fish of this.pondFish) {
-      fish.angle += fish.speed * (delta / 1000);
-      const x = fish.originX + Math.cos(fish.angle) * fish.pathRx;
-      const y = fish.originY + Math.sin(fish.angle * 0.85) * fish.pathRy;
-      const flip = Math.cos(fish.angle + 0.4) < 0;
-      fish.gfx.setPosition(x, y);
-      if (flip !== fish.lastFlip) {
-        fish.lastFlip = flip;
-        this.drawFishShape(fish.gfx, fish.hue, flip);
-      }
-    }
   }
 
   /**
@@ -2169,6 +1924,9 @@ export class LibraryScene extends Phaser.Scene {
   private buildAvatar(member: RoomMember, x: number, y: number): AvatarView {
     const isLocal = member.userId === this.myUserId;
     const frog = createFrogAvatar(this, 0, -5, 0.9);
+    // Head-only overlay: the cropped frog dome sits exactly over `frog` so the
+    // reading bob can lift just the head while the body image stays put behind.
+    const head = createFrogHead(this, 0, -5, 0.9);
     const book = drawReadingBook(this).setVisible(false);
 
     // Clicking an avatar opens the in-room interaction popup. The React host
@@ -2214,16 +1972,19 @@ export class LibraryScene extends Phaser.Scene {
       })
       .setOrigin(0.5);
 
-    // Scale the whole avatar (frog + held book + name label + timer) up together
-    // so the character is clearly visible and its labels are legible at the fit-zoom.
+    // Scale the whole avatar (frog + head overlay + held book + labels) up
+    // together so the character is clearly visible and its labels are legible
+    // at the fit-zoom. `head` sits directly above `frog` (same transform) so the
+    // pair reads as one frog; the book draws in front of the paws on top.
     const wrapper = this.add
-      .container(Math.round(x), Math.round(y), [frog, book, label, timerLabel])
+      .container(Math.round(x), Math.round(y), [frog, head, book, label, timerLabel])
       .setDepth(10)
       .setScale(AVATAR_SCALE);
 
     const view: AvatarView = {
       container: wrapper,
       frog,
+      head,
       book,
       status: member.status,
       deskSlot: member.deskSlot,
@@ -2245,10 +2006,26 @@ export class LibraryScene extends Phaser.Scene {
     return view;
   }
 
+  /**
+   * Status to actually render for an avatar. The local user's focus state is
+   * owned by the timer phase, NOT by the (often-lagging) server `status` field:
+   * during "work" they are studying and during "break" they are on break,
+   * regardless of what the latest room sync reports. Keying the reading book +
+   * bob off this — instead of the raw status — is what stops the held book from
+   * flickering off when a realtime members/chat sync lands with a stale local
+   * status (the server hasn't echoed "studying" back yet).
+   */
+  private effectiveStatus(view: AvatarView): string {
+    if (view.isLocal) {
+      if (this.timerPhase === "work") return "studying";
+      if (this.timerPhase === "break") return "break";
+    }
+    return view.status;
+  }
+
   private applyStatus(view: AvatarView, status: string) {
     view.status = status;
-    const isLocalOnBreak = view.isLocal && this.timerPhase === "break";
-    const effectiveStatus = isLocalOnBreak ? "break" : status;
+    const effectiveStatus = this.effectiveStatus(view);
     const studying = effectiveStatus === "studying";
     const onBreak = effectiveStatus === "break";
 
@@ -2280,8 +2057,7 @@ export class LibraryScene extends Phaser.Scene {
       this.playFrogAnim(view, "walk");
       return;
     }
-    const isLocalOnBreak = view.isLocal && this.timerPhase === "break";
-    const effectiveStatus = isLocalOnBreak ? "break" : view.status;
+    const effectiveStatus = this.effectiveStatus(view);
     this.playFrogAnim(view, effectiveStatus === "studying" ? "study" : "idle");
   }
 
@@ -2295,11 +2071,16 @@ export class LibraryScene extends Phaser.Scene {
     view.animKind = kind;
 
     const frog = view.frog;
+    const head = view.head;
     const base = view.baseScale;
     const restY =
       view.frogBaseY + (view.isSeated ? SIT_SINK + view.seatFaceDY : 0);
     frog.setScale(base);
     frog.setY(restY);
+    // Head overlay shares the body's rest pose so the two stay registered; only
+    // the study bob below moves it independently.
+    head.setScale(base);
+    head.setY(restY);
     view.book.setY(READING_BOOK_Y);
 
     if (kind === "walk") {
@@ -2308,9 +2089,11 @@ export class LibraryScene extends Phaser.Scene {
     }
 
     if (kind === "study") {
-      // Sitting + studying: a subtle reading bop with the open book.
+      // Reading idle: bob ONLY the head. The body image, paws and held book stay
+      // perfectly still; the full body sits behind the cropped head overlay, so
+      // the lifted sliver is backfilled by identical pixels — a seamless cozy nod.
       view.animTween = this.tweens.add({
-        targets: [frog, view.book],
+        targets: head,
         y: "-=2.5",
         duration: 1700 + Math.random() * 300,
         yoyo: true,
@@ -2318,9 +2101,10 @@ export class LibraryScene extends Phaser.Scene {
         ease: "Sine.easeInOut",
       });
     } else {
-      // Standing idle (paused between movements): a gentle, subtle bop.
+      // Standing idle (paused between movements): the whole frog (body + head
+      // together) gives a single gentle breath.
       view.animTween = this.tweens.add({
-        targets: frog,
+        targets: [frog, head],
         y: "-=2.5",
         duration: 1900 + Math.random() * 300,
         yoyo: true,
